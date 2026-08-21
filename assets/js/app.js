@@ -11,31 +11,43 @@ const COLORS = [
 ];
 const ICONS = ['🎯','🏃','💪','❤️','🧠','📚','💰','🌱','🧘','💤','🍎','🚭','🎨','🎵','💧','☀️','🧹','🕐'];
 
-const GOALS_KEY = 'foundation_goals_v3';
+const GOALS_KEY = 'foundation_goals_v4';
+const OLD_GOALS_KEY = 'foundation_goals_v3'; // previous Main Goal / Sub-Goal structure
 const SETTINGS_KEY = 'foundation_settings_v2';
 const OLD_HABITS_KEY = 'foundation_habits_v2';
 
-let goals = []; // [{id,name,icon,colorIdx,createdAt,subgoals:[{id,name,notes,createdAt,log:{}}]}]
-let settings = { dark:false, fontSize:'medium', hideNumbers:false };
-let currentFilter = 'all'; // 'all' or goal id
+let goals = []; // [{id,name,icon,colorIdx,createdAt,notes,log:{},type,unit,targetType,target,reminderOn,reminderTime}]
+let settings = { dark:false, fontSize:'medium' };
 let currentSort = 'streak-desc';
-let collapsed = {};
 let editingGoalId = null;
-let editingSubId = null;
-let quickAddGoalId = null; // when adding a sub-goal from a specific goal's + button
 let actionTargetId = null;
-let actionTargetType = null; // 'goal' | 'sub'
 let currentPage = 'today';
-let detailSubId = null;
-let detailBackTarget = 'today';
 let detailGoalId = null;
-let goalDetailReturnPage = 'pillars';
+let goalDetailReturnPage = 'today';
+let measureTargetId = null;
+let perfTab = 'daily';        // daily | weekly | monthly
+let historyRange = '12w';     // 1m | 12w | 3m | 1y
+let notifiedReminders = {};
 
 /* ---------- storage (browser localStorage — persists on this device/browser) ---------- */
 let storageAvailable = true;
 function checkStorage(){
   try{ const k='__fnd_test__'; localStorage.setItem(k,'1'); localStorage.removeItem(k); return true; }
   catch(e){ return false; }
+}
+function flattenLegacyGoals(oldGoals){
+  // old format: [{id,name,icon,colorIdx,createdAt,subgoals:[{id,name,notes,createdAt,log}]}]
+  const flat = [];
+  (oldGoals||[]).forEach(g=>{
+    if(Array.isArray(g.subgoals) && g.subgoals.length){
+      g.subgoals.forEach(s=>{
+        flat.push({ id: s.id, name: s.name, icon: g.icon, colorIdx: g.colorIdx, createdAt: s.createdAt || g.createdAt, notes: s.notes||'', log: s.log||{} });
+      });
+    } else {
+      flat.push({ id: g.id, name: g.name, icon: g.icon, colorIdx: g.colorIdx, createdAt: g.createdAt, notes: '', log: {} });
+    }
+  });
+  return flat;
 }
 async function loadAll(){
   storageAvailable = checkStorage();
@@ -45,18 +57,27 @@ async function loadAll(){
   try{ const raw = localStorage.getItem(SETTINGS_KEY); if(raw) settings = Object.assign(settings, JSON.parse(raw)); }
   catch(e){ /* defaults */ }
 
-  // one-time migration from the old single-goal habit tracker, if present and nothing new yet
   if(goals.length===0){
+    // one-time migration from the old Main Goal / Sub-Goal structure, if present
+    try{
+      const raw = localStorage.getItem(OLD_GOALS_KEY);
+      if(raw){
+        const oldGoals = JSON.parse(raw);
+        if(Array.isArray(oldGoals) && oldGoals.length){
+          goals = flattenLegacyGoals(oldGoals);
+          saveGoals();
+        }
+      }
+    }catch(e){ /* ignore */ }
+  }
+  if(goals.length===0){
+    // one-time migration from the original single-list habit tracker, if present
     try{
       const raw = localStorage.getItem(OLD_HABITS_KEY);
       if(raw){
         const oldHabits = JSON.parse(raw);
         if(Array.isArray(oldHabits) && oldHabits.length){
-          const migrated = { id:'g_'+Date.now(), name:'General', icon:'🎯', colorIdx:0, createdAt: todayStr(), subgoals:[] };
-          oldHabits.forEach(h=>{
-            migrated.subgoals.push({ id: h.id || ('s_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)), name: h.name, notes: h.notes||'', createdAt: h.createdAt||todayStr(), log: h.log||{} });
-          });
-          goals = [migrated];
+          goals = oldHabits.map((h,i)=>({ id: h.id || ('g_'+Date.now()+'_'+i), name: h.name, icon: h.icon || ICONS[i % ICONS.length], colorIdx: h.colorIdx!=null ? h.colorIdx : (i % COLORS.length), createdAt: h.createdAt||todayStr(), notes: h.notes||'', log: h.log||{} }));
           saveGoals();
         }
       }
@@ -85,22 +106,28 @@ function daysElapsedInclusive(dateStr){
 
 /* ---------- lookups ---------- */
 function findGoal(id){ return goals.find(g=>g.id===id); }
-function findSub(id){
-  for(const g of goals){ const s = g.subgoals.find(x=>x.id===id); if(s) return {goal:g, sub:s}; }
-  return null;
-}
-function allSubs(){ return goals.flatMap(g=>g.subgoals.map(s=>({goal:g, sub:s}))); }
 function colorFor(goal){ return COLORS[goal.colorIdx % COLORS.length]; }
 
-/* ---------- streak / consistency math ---------- */
-function computeSubStreak(sub){
+/* ---------- yes/no vs measurable helpers ---------- */
+function isDoneValue(goal, raw){
+  if(raw===undefined || raw===null || raw==='') return false;
+  if(goal.type==='measurable'){
+    if(typeof raw !== 'number' || isNaN(raw)) return false;
+    return goal.targetType==='max' ? raw<=goal.target : raw>=goal.target;
+  }
+  return !!raw;
+}
+function isDone(goal, dateStr){ return isDoneValue(goal, goal.log[dateStr]); }
+
+/* ---------- streak / consistency math (per goal) ---------- */
+function computeStreak(goal){
   let streak=0, d=new Date();
-  if(!sub.log[todayStr(d)]) d.setDate(d.getDate()-1);
-  while(sub.log[todayStr(d)]){ streak++; d.setDate(d.getDate()-1); }
+  if(!isDone(goal, todayStr(d))) d.setDate(d.getDate()-1);
+  while(isDone(goal, todayStr(d))){ streak++; d.setDate(d.getDate()-1); }
   return streak;
 }
-function longestSubStreak(sub){
-  const dates = Object.keys(sub.log).filter(k=>sub.log[k]).sort();
+function longestStreak(goal){
+  const dates = Object.keys(goal.log).filter(k=>isDone(goal,k)).sort();
   if(!dates.length) return 0;
   let longest=1, run=1;
   for(let i=1;i<dates.length;i++){
@@ -109,32 +136,26 @@ function longestSubStreak(sub){
   }
   return longest;
 }
-function totalCompletions(sub){ return Object.keys(sub.log).filter(k=>sub.log[k]).length; }
-function subConsistency(sub){
-  const pct = Math.round(totalCompletions(sub) / daysElapsedInclusive(sub.createdAt) * 100);
+function totalCompletions(goal){ return Object.keys(goal.log).filter(k=>isDone(goal,k)).length; }
+function consistency(goal){
+  const pct = Math.round(totalCompletions(goal) / daysElapsedInclusive(goal.createdAt) * 100);
   return Math.min(100, Math.max(0, pct));
 }
-function goalConsistency(goal){
-  if(!goal.subgoals.length) return 0;
-  return Math.round(goal.subgoals.reduce((s,sub)=>s+subConsistency(sub),0)/goal.subgoals.length);
-}
-function goalTodayDone(goal){ return goal.subgoals.filter(s=>s.log[todayStr()]).length; }
+function goalTodayDone(goal){ return isDone(goal, todayStr()); }
 function overallConsistency(){
-  const subs = allSubs();
-  if(!subs.length) return 0;
-  return Math.round(subs.reduce((s,x)=>s+subConsistency(x.sub),0)/subs.length);
+  if(!goals.length) return 0;
+  return Math.round(goals.reduce((s,g)=>s+consistency(g),0)/goals.length);
 }
 function overallStreak(){
   let streak=0, d=new Date();
-  const subs = allSubs();
-  const anyOn = ds => subs.some(x=>x.sub.log[ds]);
+  const anyOn = ds => goals.some(g=>isDone(g,ds));
   if(!anyOn(todayStr(d))) d.setDate(d.getDate()-1);
-  while(subs.length && anyOn(todayStr(d))){ streak++; d.setDate(d.getDate()-1); }
+  while(goals.length && anyOn(todayStr(d))){ streak++; d.setDate(d.getDate()-1); }
   return streak;
 }
 function overallBestStreak(){
   const allDates = new Set();
-  allSubs().forEach(x=>Object.keys(x.sub.log).forEach(k=>{ if(x.sub.log[k]) allDates.add(k); }));
+  goals.forEach(g=>Object.keys(g.log).forEach(k=>{ if(isDone(g,k)) allDates.add(k); }));
   const dates = Array.from(allDates).sort();
   if(!dates.length) return 0;
   let longest=1, run=1;
@@ -152,34 +173,31 @@ function consistencyColor(pct){
 function getCss(varName){ return getComputedStyle(document.body).getPropertyValue(varName).trim(); }
 
 /* ---------- per-goal analytics ---------- */
-function eligibleSubsOn(goal, dateStr){ return goal.subgoals.filter(s=>s.createdAt<=dateStr); }
-function goalDayStats(goal, dateStr){
-  const eligible = eligibleSubsOn(goal, dateStr);
-  const done = eligible.filter(s=>s.log[dateStr]).length;
-  return { done, eligible: eligible.length, pct: eligible.length ? Math.round(done/eligible.length*100) : 0, full: eligible.length>0 && done===eligible.length };
+function dayStats(goal, dateStr){
+  const eligible = goal.createdAt<=dateStr ? 1 : 0;
+  const raw = goal.log[dateStr];
+  const done = eligible && isDoneValue(goal, raw) ? 1 : 0;
+  return { done, eligible, pct: eligible ? done*100 : 0, full: eligible>0 && done===eligible, value: raw };
 }
-function goalStreak(goal){
-  if(!goal.subgoals.length) return 0;
-  let streak=0, d=new Date();
-  if(!goalDayStats(goal, todayStr(d)).full) d.setDate(d.getDate()-1);
-  while(goalDayStats(goal, todayStr(d)).full){ streak++; d.setDate(d.getDate()-1); }
-  return streak;
+function rangeToWeeks(range){
+  if(range==='1m') return 5;
+  if(range==='12w') return 12;
+  if(range==='3m') return 13;
+  if(range==='1y') return 52;
+  return 12;
 }
-function goalBestStreak(goal){
-  if(!goal.subgoals.length) return 0;
-  const start = new Date(goal.createdAt+'T00:00:00');
-  const end = new Date(todayStr()+'T00:00:00');
-  let longest=0, run=0;
-  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
-    if(goalDayStats(goal, todayStr(d)).full){ run++; longest=Math.max(longest,run); } else run=0;
-  }
-  return Math.max(longest, goalStreak(goal));
+function rangeLabel(range){
+  if(range==='1m') return 'Last month';
+  if(range==='12w') return 'Last 12 weeks';
+  if(range==='3m') return 'Last 3 months';
+  if(range==='1y') return 'Last year';
+  return '';
 }
 function goalDailySeries(goal, days){
   const arr=[];
   for(let i=days-1;i>=0;i--){
     const d = dateNDaysAgo(i);
-    arr.push(Object.assign({date:d, label:new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'short'})}, goalDayStats(goal,d)));
+    arr.push(Object.assign({date:d, label:new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'short'})}, dayStats(goal,d)));
   }
   return arr;
 }
@@ -189,7 +207,7 @@ function goalWeeklySeries(goal, weeks){
     let done=0, eligible=0;
     for(let i=0;i<7;i++){
       const d = dateNDaysAgo(w*7+i);
-      const s = goalDayStats(goal, d);
+      const s = dayStats(goal, d);
       done += s.done; eligible += s.eligible;
     }
     arr.push({ label: w===0 ? 'This week' : (w===1 ? 'Last week' : (w+1)+' wks ago'), pct: eligible ? Math.round(done/eligible*100) : 0, done, eligible });
@@ -206,7 +224,7 @@ function goalMonthlySeries(goal, months){
     let done=0, eligible=0;
     for(let day=1; day<=lastDay; day++){
       const d = todayStr(new Date(y,mo,day));
-      const s = goalDayStats(goal, d);
+      const s = dayStats(goal, d);
       done += s.done; eligible += s.eligible;
     }
     arr.push({ label: dt.toLocaleDateString(undefined,{month:'short'}), pct: eligible ? Math.round(done/eligible*100) : 0, done, eligible });
@@ -220,7 +238,7 @@ function goalHeatmapWeeks(goal, weeks){
   const cells=[];
   for(let d=new Date(start); d<=todayD; d.setDate(d.getDate()+1)){
     const ds = todayStr(d);
-    cells.push(Object.assign({date:ds}, goalDayStats(goal, ds)));
+    cells.push(Object.assign({date:ds}, dayStats(goal, ds)));
   }
   const rows=[];
   for(let i=0;i<cells.length;i+=7) rows.push(cells.slice(i,i+7));
@@ -231,7 +249,7 @@ function goalWeekdaySeries(goal){
   const start = new Date(goal.createdAt+'T00:00:00');
   const end = new Date(todayStr()+'T00:00:00');
   for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
-    const s = goalDayStats(goal, todayStr(d));
+    const s = dayStats(goal, todayStr(d));
     if(!s.eligible) continue;
     stats[d.getDay()].done += s.done; stats[d.getDay()].eligible += s.eligible;
   }
@@ -240,14 +258,8 @@ function goalWeekdaySeries(goal){
 }
 function goalPerfectDays(goal, days){
   let count=0;
-  for(let i=0;i<days;i++){ if(goalDayStats(goal, dateNDaysAgo(i)).full) count++; }
+  for(let i=0;i<days;i++){ if(dayStats(goal, dateNDaysAgo(i)).full) count++; }
   return count;
-}
-function goalTotalCompletions(goal){ return goal.subgoals.reduce((s,sub)=>s+totalCompletions(sub),0); }
-function perfTier(pct){
-  if(pct>=80) return {cls:'excellent', label:'Excelling'};
-  if(pct>=50) return {cls:'steady', label:'Steady'};
-  return {cls:'needs', label:'Needs focus'};
 }
 function hexToRgba(hex, alpha){
   const h = hex.replace('#','');
@@ -266,17 +278,44 @@ function toast(msg){
 }
 
 /* ---------- toggle today ---------- */
-function toggleSubToday(id){
-  const found = findSub(id); if(!found) return;
+function toggleGoalToday(id){
+  const g = findGoal(id); if(!g) return;
+  if(g.type==='measurable'){ openMeasureEntry(id); return; }
   const t = todayStr();
-  if(found.sub.log[t]) delete found.sub.log[t]; else found.sub.log[t]=true;
+  if(g.log[t]) delete g.log[t]; else g.log[t]=true;
   saveGoals(); renderCurrentPage();
 }
 
-/* ---------- add chooser ---------- */
-function openAddChoice(){ showOverlay('addChoiceOverlay'); }
+/* ---------- measurable value entry ---------- */
+function openMeasureEntry(id){
+  const g = findGoal(id); if(!g) return;
+  measureTargetId = id;
+  document.getElementById('measureTitle').textContent = g.name;
+  document.getElementById('measureSub').textContent = `Goal: ${g.targetType==='max'?'at most':'at least'} ${g.target}${g.unit?' '+g.unit:''}`;
+  document.getElementById('measureUnitLabel').textContent = g.unit ? `Today's value (${g.unit})` : "Today's value";
+  const existing = g.log[todayStr()];
+  document.getElementById('measureValue').value = (typeof existing==='number') ? existing : '';
+  showOverlay('measureOverlay');
+}
+function saveMeasureEntry(){
+  const g = findGoal(measureTargetId); if(!g) return;
+  const raw = document.getElementById('measureValue').value;
+  const v = parseFloat(raw);
+  if(raw===''||isNaN(v)){ toast('Enter a number'); return; }
+  g.log[todayStr()] = v;
+  saveGoals();
+  hideOverlay('measureOverlay');
+  renderCurrentPage();
+}
+function clearMeasureEntry(){
+  const g = findGoal(measureTargetId); if(!g) return;
+  delete g.log[todayStr()];
+  saveGoals();
+  hideOverlay('measureOverlay');
+  renderCurrentPage();
+}
 
-/* ---------- main goal form ---------- */
+/* ---------- goal form ---------- */
 function buildIconPicker(selected){
   const el = document.getElementById('iconPicker');
   el.innerHTML = ICONS.map(ic=>`<div class="icon-opt ${ic===selected?'sel':''}" data-icon="${ic}">${ic}</div>`).join('');
@@ -296,11 +335,32 @@ function buildColorPicker(selectedIdx){
 function getIconPicker(){ const sel = document.querySelector('.icon-opt.sel'); return sel ? sel.dataset.icon : ICONS[0]; }
 function getColorPicker(){ const sel = document.querySelector('.color-opt.sel'); return sel ? parseInt(sel.dataset.coloridx,10) : 0; }
 
+function setTypeToggle(type){
+  document.querySelectorAll('#typeToggle .seg-btn').forEach(b=> b.classList.toggle('active', b.dataset.type===type));
+  document.getElementById('measurableFields').style.display = type==='measurable' ? 'block' : 'none';
+}
+function getTypeToggle(){ const sel = document.querySelector('#typeToggle .seg-btn.active'); return sel ? sel.dataset.type : 'yesno'; }
+function setTargetTypeToggle(tt){
+  document.querySelectorAll('#targetTypeToggle .seg-btn').forEach(b=> b.classList.toggle('active', b.dataset.targetType===tt));
+}
+function getTargetTypeToggle(){ const sel = document.querySelector('#targetTypeToggle .seg-btn.active'); return sel ? sel.dataset.targetType : 'min'; }
+function setReminderUI(on, time){
+  document.getElementById('gReminderToggle').classList.toggle('on', !!on);
+  document.getElementById('reminderTimeField').style.display = on ? 'block' : 'none';
+  document.getElementById('gReminderTime').value = time || '20:00';
+}
+
 function openAddGoalForm(){
   editingGoalId = null;
-  document.getElementById('goalFormTitle').textContent = 'New Main Goal';
-  document.getElementById('goalFormSub').textContent = "The big outcome you're working toward.";
+  document.getElementById('goalFormTitle').textContent = 'New Goal';
+  document.getElementById('goalFormSub').textContent = 'One small, daily-trackable goal.';
   document.getElementById('gName').value = '';
+  document.getElementById('gNotes').value = '';
+  document.getElementById('gUnit').value = '';
+  document.getElementById('gTarget').value = '';
+  setTypeToggle('yesno');
+  setTargetTypeToggle('min');
+  setReminderUI(false, '20:00');
   buildIconPicker(ICONS[0]);
   buildColorPicker(goals.length % COLORS.length);
   showOverlay('goalFormOverlay');
@@ -308,25 +368,46 @@ function openAddGoalForm(){
 function openEditGoalForm(id){
   const g = findGoal(id); if(!g) return;
   editingGoalId = id;
-  document.getElementById('goalFormTitle').textContent = 'Edit Main Goal';
+  document.getElementById('goalFormTitle').textContent = 'Edit Goal';
   document.getElementById('goalFormSub').textContent = 'Update this goal.';
   document.getElementById('gName').value = g.name;
+  document.getElementById('gNotes').value = g.notes||'';
+  document.getElementById('gUnit').value = g.unit||'';
+  document.getElementById('gTarget').value = (g.target!=null) ? g.target : '';
+  setTypeToggle(g.type==='measurable' ? 'measurable' : 'yesno');
+  setTargetTypeToggle(g.targetType==='max' ? 'max' : 'min');
+  setReminderUI(!!g.reminderOn, g.reminderTime);
   buildIconPicker(g.icon);
   buildColorPicker(g.colorIdx);
   showOverlay('goalFormOverlay');
 }
 function saveGoalForm(){
   const name = document.getElementById('gName').value.trim();
-  if(!name){ toast('Give your Main Goal a name'); return; }
+  if(!name){ toast('Give your goal a name'); return; }
   const icon = getIconPicker();
   const colorIdx = getColorPicker();
+  const notes = document.getElementById('gNotes').value.trim();
+  const type = getTypeToggle();
+
+  let unit='', targetType='min', target=null;
+  if(type==='measurable'){
+    unit = document.getElementById('gUnit').value.trim();
+    targetType = getTargetTypeToggle();
+    const targetRaw = document.getElementById('gTarget').value;
+    target = parseFloat(targetRaw);
+    if(targetRaw===''||isNaN(target)){ toast('Enter a target amount'); return; }
+  }
+
+  const reminderOn = document.getElementById('gReminderToggle').classList.contains('on');
+  const reminderTime = reminderOn ? document.getElementById('gReminderTime').value : '';
+
   if(editingGoalId){
     const g = findGoal(editingGoalId);
-    g.name = name; g.icon = icon; g.colorIdx = colorIdx;
+    Object.assign(g, { name, icon, colorIdx, notes, type, unit, targetType, target, reminderOn, reminderTime });
     toast('Goal updated');
   } else {
-    goals.push({ id:'g_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), name, icon, colorIdx, createdAt: todayStr(), subgoals:[] });
-    toast('Main Goal added');
+    goals.push({ id:'g_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), name, icon, colorIdx, createdAt: todayStr(), notes, log:{}, type, unit, targetType, target, reminderOn, reminderTime });
+    toast('Goal added');
   }
   saveGoals();
   hideOverlay('goalFormOverlay');
@@ -337,89 +418,7 @@ function deleteGoal(id){
   saveGoals();
   hideOverlay('actionOverlay');
   toast('Goal deleted');
-  if(currentFilter===id) currentFilter='all';
-  if(currentPage==='detail') switchPage('today');
-  if(currentPage==='goal-detail' && detailGoalId===id) switchPage('pillars');
-  renderCurrentPage();
-}
-
-/* ---------- sub-goal form ---------- */
-function buildGoalChips(selectedId){
-  const el = document.getElementById('goalChipRow');
-  if(!goals.length){ el.innerHTML = `<div style="font-size:13px;color:var(--gray);">Create a Main Goal first.</div>`; return; }
-  el.innerHTML = goals.map(g=>{
-    const c = colorFor(g);
-    return `<div class="goal-chip ${g.id===selectedId?'sel':''}" data-goalchip="${g.id}"><span class="gc-icon" style="background:${c.hex}">${g.icon}</span>${escapeHtml(g.name)}</div>`;
-  }).join('');
-  el.querySelectorAll('[data-goalchip]').forEach(c=>{
-    c.addEventListener('click', ()=>{
-      el.querySelectorAll('.goal-chip').forEach(x=>x.classList.remove('sel'));
-      c.classList.add('sel');
-    });
-  });
-}
-function getSelectedGoalChip(){ const sel = document.querySelector('.goal-chip.sel'); return sel ? sel.dataset.goalchip : null; }
-
-function openAddSubForm(preselectGoalId){
-  if(goals.length===0){
-    toast('Create a Main Goal first');
-    openAddGoalForm();
-    return;
-  }
-  editingSubId = null;
-  quickAddGoalId = preselectGoalId || null;
-  document.getElementById('subFormTitle').textContent = 'New Sub-Goal';
-  document.getElementById('subFormSub').textContent = 'One small, daily-trackable action.';
-  document.getElementById('sName').value = '';
-  document.getElementById('sNotes').value = '';
-  const defaultGoal = preselectGoalId || (goals[0] && goals[0].id);
-  buildGoalChips(defaultGoal);
-  document.getElementById('subGoalPickerField').style.display = preselectGoalId && goals.length===1 ? 'none' : 'block';
-  showOverlay('subFormOverlay');
-}
-function openEditSubForm(id){
-  const found = findSub(id); if(!found) return;
-  editingSubId = id;
-  quickAddGoalId = null;
-  document.getElementById('subFormTitle').textContent = 'Edit Sub-Goal';
-  document.getElementById('subFormSub').textContent = 'Update this sub-goal.';
-  document.getElementById('sName').value = found.sub.name;
-  document.getElementById('sNotes').value = found.sub.notes||'';
-  buildGoalChips(found.goal.id);
-  document.getElementById('subGoalPickerField').style.display = 'block';
-  showOverlay('subFormOverlay');
-}
-function saveSubForm(){
-  const name = document.getElementById('sName').value.trim();
-  if(!name){ toast('Give your sub-goal a name'); return; }
-  const goalId = getSelectedGoalChip();
-  if(!goalId){ toast('Choose a Main Goal'); return; }
-  const notes = document.getElementById('sNotes').value.trim();
-  if(editingSubId){
-    const found = findSub(editingSubId);
-    found.sub.name = name; found.sub.notes = notes;
-    if(found.goal.id !== goalId){
-      // move to a different main goal, preserving history
-      found.goal.subgoals = found.goal.subgoals.filter(s=>s.id!==editingSubId);
-      findGoal(goalId).subgoals.push(found.sub);
-    }
-    toast('Sub-goal updated');
-  } else {
-    const g = findGoal(goalId);
-    g.subgoals.push({ id:'s_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), name, notes, createdAt: todayStr(), log:{} });
-    toast('Sub-goal added');
-  }
-  saveGoals();
-  hideOverlay('subFormOverlay');
-  renderCurrentPage();
-}
-function deleteSub(id){
-  const found = findSub(id); if(!found) return;
-  found.goal.subgoals = found.goal.subgoals.filter(s=>s.id!==id);
-  saveGoals();
-  hideOverlay('actionOverlay');
-  toast('Sub-goal deleted');
-  if(currentPage==='detail') switchPage(detailBackTarget || 'today');
+  if(currentPage==='goal-detail' && detailGoalId===id) switchPage(goalDetailReturnPage || 'today');
   else renderCurrentPage();
 }
 
@@ -441,144 +440,89 @@ function renderCurrentPage(){
   if(currentPage==='today') renderToday();
   else if(currentPage==='progress') renderProgress();
   else if(currentPage==='pillars') renderGoalsOverview();
-  else if(currentPage==='detail') renderDetail();
   else if(currentPage==='goal-detail') renderGoalDetail();
 }
 function openGoalDetail(id, returnPage){
   const g = findGoal(id); if(!g) return;
   detailGoalId = id;
-  goalDetailReturnPage = returnPage || (currentPage==='today' ? 'today' : 'pillars');
+  goalDetailReturnPage = returnPage || currentPage;
   switchPage('goal-detail');
 }
 
 /* ---------- TODAY ---------- */
-function sortedSubs(list){
+function sortedGoals(list){
   list = list.slice();
   const dir = currentSort.endsWith('asc') ? 1 : -1;
-  if(currentSort.startsWith('streak')) list.sort((a,b)=> dir*(computeSubStreak(a)-computeSubStreak(b)));
+  if(currentSort.startsWith('streak')) list.sort((a,b)=> dir*(computeStreak(a)-computeStreak(b)));
   else if(currentSort==='name-asc') list.sort((a,b)=> a.name.localeCompare(b.name));
   else if(currentSort==='created-asc') list.sort((a,b)=> a.createdAt.localeCompare(b.createdAt));
   return list;
 }
-function syncFilterOptions(){
-  const el = document.getElementById('filterOptions');
-  let html = `<label class="check-row"><input type="radio" name="filterRadio" data-filter-radio="all"><span class="radio-box"></span><span class="check-label">All Goals</span></label>`;
-  html += goals.map(g=>`<label class="check-row"><input type="radio" name="filterRadio" data-filter-radio="${g.id}"><span class="radio-box"></span><span class="check-label">${g.icon} ${escapeHtml(g.name)}</span></label>`).join('');
-  el.innerHTML = html;
-  el.querySelectorAll('[data-filter-radio]').forEach(r=>{
-    r.checked = r.dataset.filterRadio===currentFilter;
-    r.addEventListener('change', ()=>{ currentFilter = r.dataset.filterRadio; hideOverlay('filterOverlay'); renderToday(); });
-  });
-}
 function renderToday(){
-  const totalSubs = allSubs().length;
-  document.getElementById('habitCount').textContent = totalSubs + ' sub-goal' + (totalSubs===1?'':'s') + ' · ' + goals.length + ' goal' + (goals.length===1?'':'s');
+  document.getElementById('habitCount').textContent = goals.length + ' goal' + (goals.length===1?'':'s');
 
   const oc = overallConsistency(), cs = overallStreak(), bs = overallBestStreak();
   document.getElementById('consistencyValue').textContent = oc+'%';
   document.getElementById('consistencyRing').style.background = `conic-gradient(${consistencyColor(oc)} 0% ${oc}%, #EEEAE0 ${oc}% 100%)`;
-  const todayDone = allSubs().filter(x=>x.sub.log[todayStr()]).length;
-  document.getElementById('sumToday').textContent = todayDone+'/'+totalSubs;
+  const todayDone = goals.filter(g=>isDone(g, todayStr())).length;
+  document.getElementById('sumToday').textContent = todayDone+'/'+goals.length;
   document.getElementById('curStreak').textContent = cs+' day'+(cs===1?'':'s');
   document.getElementById('bestStreak').textContent = bs+' day'+(bs===1?'':'s');
-
-  document.getElementById('filterPickerLabel').textContent = currentFilter==='all' ? 'All Goals' : (findGoal(currentFilter) ? findGoal(currentFilter).name : 'All Goals');
-  document.getElementById('filtersBtn').classList.toggle('active-filter', currentFilter!=='all');
 
   const listsEl = document.getElementById('lists');
   listsEl.innerHTML = '';
 
   if(goals.length===0){
-    listsEl.innerHTML = `<div class="empty-state"><div class="glyph">🎯</div><p>No goals yet.<br>Tap + to create your first Main Goal, then add Sub-Goals under it.</p></div>`;
+    listsEl.innerHTML = `<div class="empty-state"><div class="glyph">🎯</div><p>No goals yet.<br>Tap + to create your first goal.</p></div>`;
     return;
   }
 
-  const goalsToShow = currentFilter==='all' ? goals : [findGoal(currentFilter)].filter(Boolean);
-
-  goalsToShow.forEach(g=>{
+  const list = sortedGoals(goals);
+  const wrap = document.createElement('div');
+  wrap.className = 'group';
+  list.forEach(g=>{
+    const done = isDone(g, todayStr());
+    const streak = computeStreak(g);
     const c = colorFor(g);
-    const list = sortedSubs(g.subgoals);
-    const done = goalTodayDone(g);
-    const pct = goalConsistency(g);
-    const isCollapsed = !!collapsed[g.id];
-
-    const group = document.createElement('div');
-    group.className = 'group';
-    group.innerHTML = `
-      <div class="group-head">
-        <span class="caret ${isCollapsed?'collapsed':''}" data-toggle="${g.id}" title="Collapse/expand">▾</span>
-        <div class="group-clickable" data-goaldetail="${g.id}">
-          <div class="group-badge" style="background:${c.hex}">${g.icon}</div>
-          <div class="group-main">
-            <div class="group-name">${escapeHtml(g.name)}</div>
-            <div class="group-sub">${list.length} sub-goal${list.length===1?'':'s'} · ${done}/${list.length} today</div>
-          </div>
-        </div>
-        <div class="group-pct" style="background:${c.bg};color:${c.hex}">${pct}%</div>
-        <button class="group-iconbtn" data-addsub="${g.id}" title="Add sub-goal">+</button>
-        <button class="group-iconbtn" data-goalmenu="${g.id}" title="Manage goal">⋯</button>
+    const todayVal = g.log[todayStr()];
+    const valNote = (g.type==='measurable' && typeof todayVal==='number') ? ` · Today: ${todayVal}${g.unit?' '+g.unit:''}` : '';
+    const row = document.createElement('div');
+    row.className = 'entry';
+    row.innerHTML = `
+      <div class="status-toggle ${done?'done':'notdone'}" data-check="${g.id}">
+        <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        <svg class="x-icon" viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </div>
-      <div class="group-body ${isCollapsed?'collapsed':''}" id="gb-${g.id}"><div class="group-body-inner"></div></div>
+      <div class="entry-icon" style="background:${c.hex}">${g.icon}</div>
+      <div class="entry-main" data-open="${g.id}">
+        <div class="entry-name">${escapeHtml(g.name)}</div>
+        <div class="entry-sub">${streak>0 ? '🔥 '+streak+'-day streak' : 'Start today'} · ${consistency(g)}% consistency${valNote}</div>
+      </div>
+      <button class="entry-menu" data-menu="${g.id}">⋯</button>
     `;
-    listsEl.appendChild(group);
-
-    const body = group.querySelector('.group-body-inner');
-    if(list.length===0){
-      body.innerHTML = `<div class="empty-state" style="padding:26px 16px;"><p>No sub-goals yet.<br>Tap + above to add one.</p></div>`;
-    } else {
-      list.forEach(sub=>{
-        const done = !!sub.log[todayStr()];
-        const streak = computeSubStreak(sub);
-        const row = document.createElement('div');
-        row.className = 'entry';
-        row.innerHTML = `
-          <div class="status-toggle ${done?'done':'notdone'}" data-check="${sub.id}">
-            <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            <svg class="x-icon" viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </div>
-          <div class="entry-main" data-open="${sub.id}">
-            <div class="entry-name">${escapeHtml(sub.name)}</div>
-            <div class="entry-sub blur-num">${streak>0 ? '🔥 '+streak+'-day streak' : 'Start today'} · ${subConsistency(sub)}% consistency</div>
-          </div>
-          <button class="entry-menu" data-menu="${sub.id}">⋯</button>
-        `;
-        body.appendChild(row);
-      });
-    }
+    wrap.appendChild(row);
   });
+  listsEl.appendChild(wrap);
 
   wireTodayEvents();
 }
 function wireTodayEvents(){
-  document.querySelectorAll('[data-toggle]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); const k=el.dataset.toggle; collapsed[k]=!collapsed[k]; renderToday(); });
-  });
-  document.querySelectorAll('[data-goaldetail]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); openGoalDetail(el.dataset.goaldetail, 'today'); });
-  });
   document.querySelectorAll('[data-check]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); toggleSubToday(el.dataset.check); });
+    el.addEventListener('click', e=>{ e.stopPropagation(); toggleGoalToday(el.dataset.check); });
   });
   document.querySelectorAll('[data-open]').forEach(el=>{
-    el.addEventListener('click', ()=>{ detailSubId = el.dataset.open; detailBackTarget='today'; switchPage('detail'); });
+    el.addEventListener('click', ()=>{ openGoalDetail(el.dataset.open, 'today'); });
   });
   document.querySelectorAll('[data-menu]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); openActionSheet(el.dataset.menu, 'sub'); });
-  });
-  document.querySelectorAll('[data-goalmenu]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); openActionSheet(el.dataset.goalmenu, 'goal'); });
-  });
-  document.querySelectorAll('[data-addsub]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); openAddSubForm(el.dataset.addsub); });
+    el.addEventListener('click', e=>{ e.stopPropagation(); openActionSheet(el.dataset.menu); });
   });
 }
 
 /* ---------- PROGRESS ---------- */
 function renderProgress(){
   const el = document.getElementById('progressContent');
-  const subs = allSubs();
-  if(subs.length===0){
-    el.innerHTML = `<div class="empty-state"><div class="glyph">📈</div><p>Add a few sub-goals to see your progress here.</p></div>`;
+  if(goals.length===0){
+    el.innerHTML = `<div class="empty-state"><div class="glyph">📈</div><p>Add a few goals to see your progress here.</p></div>`;
     return;
   }
   const days = [];
@@ -587,21 +531,21 @@ function renderProgress(){
 
   let weekHtml = `<div class="stat-card"><h3>Completed per day</h3>`;
   days.forEach((d,i)=>{
-    const eligible = subs.filter(x=>x.sub.createdAt<=d);
-    const done = eligible.filter(x=>x.sub.log[d]).length;
+    const eligible = goals.filter(g=>g.createdAt<=d);
+    const done = eligible.filter(g=>isDone(g,d)).length;
     const pct = eligible.length ? Math.round(done/eligible.length*100) : 0;
     weekHtml += `<div class="bar-row"><div class="bar-row-top"><span class="bn">${dayNames[i]}</span><span class="bv">${done}/${eligible.length}</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></div>`;
   });
   weekHtml += `</div>`;
 
-  const sorted = subs.slice().sort((a,b)=>computeSubStreak(b.sub)-computeSubStreak(a.sub));
-  const maxStreak = Math.max(1, ...sorted.map(x=>computeSubStreak(x.sub)));
+  const sorted = goals.slice().sort((a,b)=>computeStreak(b)-computeStreak(a));
+  const maxStreak = Math.max(1, ...sorted.map(g=>computeStreak(g)));
   let streakHtml = `<div class="stat-card"><h3>Current streaks</h3>`;
-  sorted.forEach(x=>{
-    const s = computeSubStreak(x.sub);
-    const c = colorFor(x.goal);
+  sorted.forEach(g=>{
+    const s = computeStreak(g);
+    const c = colorFor(g);
     const pct = Math.round(s/maxStreak*100);
-    streakHtml += `<div class="bar-row"><div class="bar-row-top"><span class="bn">${x.goal.icon} ${escapeHtml(x.sub.name)}</span><span class="bv">${s}d</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${c.hex}"></div></div></div>`;
+    streakHtml += `<div class="bar-row"><div class="bar-row-top"><span class="bn">${g.icon} ${escapeHtml(g.name)}</span><span class="bv">${s}d</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${c.hex}"></div></div></div>`;
   });
   streakHtml += `</div>`;
 
@@ -612,15 +556,15 @@ function renderProgress(){
 function renderGoalsOverview(){
   const el = document.getElementById('pillarsContent');
   if(goals.length===0){
-    el.innerHTML = `<div class="empty-state"><div class="glyph">🧭</div><p>No goals yet.<br>Tap + on Today to create your first Main Goal.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="glyph">🧭</div><p>No goals yet.<br>Tap + on Today to create your first one.</p></div>`;
     return;
   }
-  const totals = goals.map(g=>({g, count: g.subgoals.reduce((s,sub)=>s+totalCompletions(sub),0)}));
+  const totals = goals.map(g=>({g, count: totalCompletions(g)}));
   const grand = totals.reduce((s,t)=>s+t.count,0);
 
   let donutHtml;
   if(grand===0){
-    donutHtml = `<div class="stat-card" style="text-align:center;"><div class="glyph" style="font-size:30px;">🧭</div><p style="color:var(--gray);font-size:13.5px;margin-top:8px;">Complete a few sub-goals to see your breakdown.</p></div>`;
+    donutHtml = `<div class="stat-card" style="text-align:center;"><div class="glyph" style="font-size:30px;">🧭</div><p style="color:var(--gray);font-size:13.5px;margin-top:8px;">Complete a few goals to see your breakdown.</p></div>`;
   } else {
     let acc=0; const stops=[];
     totals.forEach(t=>{
@@ -643,11 +587,12 @@ function renderGoalsOverview(){
   const cardsHtml = goals.map(g=>{
     const c = colorFor(g);
     const done = goalTodayDone(g);
-    const pct = goalConsistency(g);
+    const pct = consistency(g);
+    const streak = computeStreak(g);
     return `<div class="pillar-card" data-goaldetail="${g.id}">
       <div class="pillar-avatar" style="background:${c.hex}">${g.icon}</div>
-      <div class="pillar-main"><div class="pillar-cname">${escapeHtml(g.name)}</div><div class="pillar-csub">${g.subgoals.length} sub-goal${g.subgoals.length===1?'':'s'} · ${pct}% consistency</div></div>
-      <div class="pillar-cnet" style="color:${c.hex}">${done}/${g.subgoals.length}</div>
+      <div class="pillar-main"><div class="pillar-cname">${escapeHtml(g.name)}</div><div class="pillar-csub">${streak>0 ? '🔥 '+streak+'-day streak':'Start today'} · ${pct}% consistency</div></div>
+      <div class="pillar-cnet" style="color:${c.hex}">${done?'✓':'—'}</div>
       <div class="pillar-chevron">›</div>
     </div>`;
   }).join('');
@@ -659,70 +604,57 @@ function renderGoalsOverview(){
   });
 }
 
-/* ---------- GOAL DETAIL (main goal) ---------- */
+/* ---------- GOAL DETAIL ---------- */
 function renderGoalDetail(){
   const g = findGoal(detailGoalId);
   const el = document.getElementById('goalDetailContent');
   if(!g){ el.innerHTML = `<div class="empty-state"><p>Goal not found.</p></div>`; return; }
   const c = colorFor(g);
-  const pct = goalConsistency(g);
-  const streak = goalStreak(g);
-  const best = goalBestStreak(g);
-  const todayS = goalDayStats(g, todayStr());
-  const subs = g.subgoals.slice().sort((a,b)=> subConsistency(b) - subConsistency(a));
+  const pct = consistency(g);
+  const streak = computeStreak(g);
+  const best = longestStreak(g);
+  const total = totalCompletions(g);
+
+  const days = []; for(let i=6;i>=0;i--) days.push(dateNDaysAgo(i));
+  const weekHtml = days.map(d=>{
+    const on = isDone(g, d);
+    const label = new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'narrow'});
+    return `<div class="week-cell ${on?'on':'off'}" style="${on?`background:${c.hex}`:''}">${label}</div>`;
+  }).join('');
 
   el.innerHTML = `
     <div class="gd-header">
       <div class="gd-avatar" style="background:${c.hex}">${g.icon}</div>
       <div class="gd-headtext">
         <h2>${escapeHtml(g.name)}</h2>
-        <p>${g.subgoals.length} sub-goal${g.subgoals.length===1?'':'s'} · started ${fmtDate(g.createdAt)}</p>
+        <p>Started ${fmtDate(g.createdAt)}</p>
       </div>
-      <button class="group-iconbtn" id="gdAddSubBtn" title="Add sub-goal">+</button>
       <button class="group-iconbtn" id="gdMenuBtn" title="Manage goal">⋯</button>
     </div>
 
-    <div class="summary-card" style="margin-top:14px;">
-      <div class="consistency-hero">
+    <div class="summary-card" style="margin-top:14px;text-align:center;">
+      <div class="consistency-hero" style="justify-content:center;">
         <div class="consistency-ring" style="background:conic-gradient(${c.hex} 0% ${pct}%, #EEEAE0 ${pct}% 100%)">
           <div class="consistency-hole"><div class="cr-value">${pct}%</div><div class="cr-label">Consistency</div></div>
         </div>
-        <div class="consistency-stats">
-          <div class="cstat"><div class="label">Today</div><div class="value">${todayS.done}/${todayS.eligible}</div></div>
-          <div class="cstat"><div class="label">Current Streak</div><div class="value">${streak} day${streak===1?'':'s'}</div></div>
-          <div class="cstat"><div class="label">Best Streak</div><div class="value">${best} day${best===1?'':'s'}</div></div>
-        </div>
       </div>
-      <p class="gd-streak-note">Streak = every sub-goal under this goal completed that day.</p>
+      <div class="week-strip">${weekHtml}</div>
     </div>
 
-    ${subs.length===0 ? `
-    <div class="empty-state" style="padding:30px 16px;"><p>No sub-goals yet.<br>Tap + above to add your first one.</p></div>
-    ` : `
-    <div class="section-title">Sub-Goals <span>${subs.length}</span></div>
-    <div class="gd-sub-list">
-      ${subs.map(sub=>{
-        const sc = subConsistency(sub);
-        const sstreak = computeSubStreak(sub);
-        const done = !!sub.log[todayStr()];
-        const tier = perfTier(sc);
-        return `<div class="gd-sub-row">
-          <div class="status-toggle ${done?'done':'notdone'}" data-check="${sub.id}">
-            <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            <svg class="x-icon" viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </div>
-          <div class="gd-sub-main" data-open="${sub.id}">
-            <div class="gd-sub-top"><span class="entry-name">${escapeHtml(sub.name)}</span><span class="perf-badge ${tier.cls}">${tier.label}</span></div>
-            <div class="entry-sub">${sstreak>0 ? '🔥 '+sstreak+'-day streak':'Start today'} · ${sc}% consistency</div>
-            <div class="bar-track" style="margin-top:6px;"><div class="bar-fill" style="width:${sc}%;background:${c.hex}"></div></div>
-          </div>
-          <button class="entry-menu" data-menu="${sub.id}">⋯</button>
-        </div>`;
-      }).join('')}
+    <div class="detail-list" style="margin-top:14px;">
+      <div class="detail-row"><span class="detail-label">Current streak</span><span class="detail-value">${streak} day${streak===1?'':'s'}</span></div>
+      <div class="detail-row"><span class="detail-label">Best streak</span><span class="detail-value">${best} day${best===1?'':'s'}</span></div>
+      <div class="detail-row"><span class="detail-label">Total completions</span><span class="detail-value">${total}</span></div>
+      <div class="detail-row"><span class="detail-label">Started</span><span class="detail-value">${fmtDate(g.createdAt)}</span></div>
+      ${g.notes ? `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${escapeHtml(g.notes)}</span></div>` : ''}
     </div>
-    `}
 
-    ${g.subgoals.length ? renderGoalCharts(g, c) : ''}
+    ${renderGoalCharts(g, c)}
+
+    <div class="detail-actions">
+      <button class="btn-cancel" id="gdEditBtn" style="flex:1;">Edit</button>
+      <button class="btn-cancel" id="gdDeleteBtn" style="flex:1;color:var(--red);">Delete</button>
+    </div>
   `;
 
   wireGoalDetailEvents(g);
@@ -732,55 +664,66 @@ function renderGoalCharts(g, c){
   const daily = goalDailySeries(g, 7);
   const weekly = goalWeeklySeries(g, 6);
   const monthly = goalMonthlySeries(g, 6);
-  const heatRows = goalHeatmapWeeks(g, 12);
+  const heatWeeks = rangeToWeeks(historyRange);
+  const heatRows = goalHeatmapWeeks(g, heatWeeks);
   const weekday = goalWeekdaySeries(g).filter(w=>w.eligible>0);
-  const bestSub = g.subgoals.slice().sort((a,b)=>subConsistency(b)-subConsistency(a))[0];
-  const worstSub = g.subgoals.slice().sort((a,b)=>subConsistency(a)-subConsistency(b))[0];
   const bestDay = weekday.length ? weekday.slice().sort((a,b)=>b.pct-a.pct)[0] : null;
   const perfect30 = goalPerfectDays(g, 30);
-  const totalDone = goalTotalCompletions(g);
 
-  const dailyHtml = `<div class="stat-card"><h3>Daily performance <span class="stat-card-sub">Last 7 days</span></h3>
-    ${daily.map(d=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${d.label}</span><span class="bv">${d.done}/${d.eligible}</span></div><div class="bar-track"><div class="bar-fill" style="width:${d.pct}%;background:${c.hex}"></div></div></div>`).join('')}
-  </div>`;
+  const bv = d => {
+    if(!d.eligible) return '';
+    if(g.type==='measurable') return (typeof d.value==='number') ? `${d.value}${g.unit?' '+g.unit:''}` : '—';
+    return d.done ? '✓' : '—';
+  };
 
-  const weeklyHtml = `<div class="stat-card"><h3>Weekly performance <span class="stat-card-sub">Last 6 weeks</span></h3>
-    ${weekly.map(w=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${w.label}</span><span class="bv">${w.pct}%</span></div><div class="bar-track"><div class="bar-fill" style="width:${w.pct}%;background:${c.hex}"></div></div></div>`).join('')}
-  </div>`;
+  const dailyBody = daily.map(d=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${d.label}</span><span class="bv">${bv(d)}</span></div><div class="bar-track"><div class="bar-fill" style="width:${d.pct}%;background:${c.hex}"></div></div></div>`).join('');
+  const weeklyBody = weekly.map(w=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${w.label}</span><span class="bv">${w.pct}%</span></div><div class="bar-track"><div class="bar-fill" style="width:${w.pct}%;background:${c.hex}"></div></div></div>`).join('');
+  const monthlyBody = monthly.map(m=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${m.label}</span><span class="bv">${m.pct}%</span></div><div class="bar-track"><div class="bar-fill" style="width:${m.pct}%;background:${c.hex}"></div></div></div>`).join('');
 
-  const monthlyHtml = `<div class="stat-card"><h3>Monthly performance <span class="stat-card-sub">Last 6 months</span></h3>
-    ${monthly.map(m=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${m.label}</span><span class="bv">${m.pct}%</span></div><div class="bar-track"><div class="bar-fill" style="width:${m.pct}%;background:${c.hex}"></div></div></div>`).join('')}
+  const perfLabels = { daily:'Last 7 days', weekly:'Last 6 weeks', monthly:'Last 6 months' };
+  const perfBody = perfTab==='daily' ? dailyBody : (perfTab==='weekly' ? weeklyBody : monthlyBody);
+
+  const perfHtml = `<div class="stat-card">
+    <h3>Performance <span class="stat-card-sub">${perfLabels[perfTab]}</span></h3>
+    <div class="seg-control" id="perfTabs">
+      <button type="button" class="seg-btn ${perfTab==='daily'?'active':''}" data-perf="daily">Daily</button>
+      <button type="button" class="seg-btn ${perfTab==='weekly'?'active':''}" data-perf="weekly">Weekly</button>
+      <button type="button" class="seg-btn ${perfTab==='monthly'?'active':''}" data-perf="monthly">Monthly</button>
+    </div>
+    <div style="margin-top:14px;">${perfBody}</div>
   </div>`;
 
   const dayLabels = ['S','M','T','W','T','F','S'];
   const heatHtml = `<div class="stat-card">
-    <h3>Tracking history <span class="stat-card-sub">Last 12 weeks</span></h3>
-    <div class="heatmap-daylabels">${dayLabels.map(l=>`<span>${l}</span>`).join('')}</div>
+    <h3>Tracking history <span class="stat-card-sub">${rangeLabel(historyRange)}</span></h3>
+    <div class="seg-control wrap4" id="historyTabs">
+      <button type="button" class="seg-btn ${historyRange==='1m'?'active':''}" data-range="1m">1 Month</button>
+      <button type="button" class="seg-btn ${historyRange==='12w'?'active':''}" data-range="12w">12 Weeks</button>
+      <button type="button" class="seg-btn ${historyRange==='3m'?'active':''}" data-range="3m">3 Months</button>
+      <button type="button" class="seg-btn ${historyRange==='1y'?'active':''}" data-range="1y">1 Year</button>
+    </div>
+    <div class="heatmap-daylabels" style="margin-top:14px;">${dayLabels.map(l=>`<span>${l}</span>`).join('')}</div>
     <div class="heatmap-grid">
       ${heatRows.map(row=>`<div class="heatmap-row">${row.map(cell=>{
         const isFuture = cell.date > todayStr();
         const noData = cell.eligible===0;
         let style = 'background:#EEEAE0;';
-        if(!isFuture && !noData) style = `background:${hexToRgba(c.hex, 0.12 + (cell.pct/100)*0.78)};`;
-        const title = isFuture ? '' : (noData ? `${fmtDate(cell.date)}: no sub-goals yet` : `${fmtDate(cell.date)}: ${cell.done}/${cell.eligible} (${cell.pct}%)`);
+        if(!isFuture && !noData) style = `background:${hexToRgba(c.hex, cell.done ? 0.9 : 0.12)};`;
+        const title = isFuture ? '' : (noData ? `${fmtDate(cell.date)}: not started yet` : `${fmtDate(cell.date)}: ${cell.done ? 'done' : 'not done'}`);
         return `<div class="heatmap-cell ${isFuture?'future':''}" style="${style}" title="${title}"></div>`;
       }).join('')}</div>`).join('')}
     </div>
     <div class="heatmap-legend"><span>Less</span>
       <span class="heatmap-cell" style="background:${hexToRgba(c.hex,0.12)}"></span>
-      <span class="heatmap-cell" style="background:${hexToRgba(c.hex,0.4)}"></span>
-      <span class="heatmap-cell" style="background:${hexToRgba(c.hex,0.65)}"></span>
       <span class="heatmap-cell" style="background:${hexToRgba(c.hex,0.9)}"></span>
       <span>More</span>
     </div>
   </div>`;
 
   const insightCards = [];
-  if(bestSub) insightCards.push({icon:'🏆', label:'Best performing', value:bestSub.name, sub:subConsistency(bestSub)+'% consistency'});
-  if(worstSub && g.subgoals.length>1) insightCards.push({icon:'🎯', label:'Needs improvement', value:worstSub.name, sub:subConsistency(worstSub)+'% consistency'});
   if(bestDay) insightCards.push({icon:'📅', label:'Best day of week', value:bestDay.name+'day', sub:bestDay.pct+'% completion'});
-  insightCards.push({icon:'✅', label:'Perfect days', value:perfect30+' / 30', sub:'fully completed, last 30 days'});
-  insightCards.push({icon:'📊', label:'Total completions', value:String(totalDone), sub:'across all sub-goals'});
+  insightCards.push({icon:'✅', label:'Perfect days', value:perfect30+' / 30', sub:'completed, last 30 days'});
+  insightCards.push({icon:'📊', label:'Total completions', value:String(totalCompletions(g)), sub:'since you started'});
 
   const insightHtml = `<div class="stat-card"><h3>Other useful analysis</h3>
     <div class="insight-grid">
@@ -788,85 +731,25 @@ function renderGoalCharts(g, c){
     </div>
   </div>`;
 
-  return dailyHtml + weeklyHtml + monthlyHtml + heatHtml + insightHtml;
+  return perfHtml + heatHtml + insightHtml;
 }
 
 function wireGoalDetailEvents(g){
-  document.getElementById('gdAddSubBtn').addEventListener('click', ()=> openAddSubForm(g.id));
-  document.getElementById('gdMenuBtn').addEventListener('click', ()=> openActionSheet(g.id, 'goal'));
-  document.querySelectorAll('#goalDetailContent [data-check]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); toggleSubToday(el.dataset.check); });
+  document.getElementById('gdMenuBtn').addEventListener('click', ()=> openActionSheet(g.id));
+  document.getElementById('gdEditBtn').addEventListener('click', ()=> openEditGoalForm(g.id));
+  document.getElementById('gdDeleteBtn').addEventListener('click', ()=>{
+    if(confirm('Delete "'+g.name+'" and all its history?')) deleteGoal(g.id);
   });
-  document.querySelectorAll('#goalDetailContent [data-open]').forEach(el=>{
-    el.addEventListener('click', ()=>{ detailSubId = el.dataset.open; detailBackTarget='goal-detail'; switchPage('detail'); });
-  });
-  document.querySelectorAll('#goalDetailContent [data-menu]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); openActionSheet(el.dataset.menu, 'sub'); });
-  });
+  document.querySelectorAll('[data-perf]').forEach(b=> b.addEventListener('click', ()=>{ perfTab = b.dataset.perf; renderGoalDetail(); }));
+  document.querySelectorAll('[data-range]').forEach(b=> b.addEventListener('click', ()=>{ historyRange = b.dataset.range; renderGoalDetail(); }));
 }
 
-/* ---------- DETAIL (sub-goal) ---------- */
-function renderDetail(){
-  const found = findSub(detailSubId);
-  const el = document.getElementById('detailContent');
-  if(!found){ el.innerHTML = `<div class="empty-state"><p>Sub-goal not found.</p></div>`; return; }
-  const { goal: g, sub } = found;
-  const c = colorFor(g);
-  const streak = computeSubStreak(sub), longest = longestSubStreak(sub), total = totalCompletions(sub), consistency = subConsistency(sub);
-
-  const days = []; for(let i=6;i>=0;i--) days.push(dateNDaysAgo(i));
-  const weekHtml = days.map(d=>{
-    const on = !!sub.log[d];
-    const label = new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'narrow'});
-    return `<div class="week-cell ${on?'on':'off'}" style="${on?`background:${c.hex}`:''}">${label}</div>`;
-  }).join('');
-
-  el.innerHTML = `
-    <div class="detail-header"><h2>${escapeHtml(sub.name)}</h2><p>${g.icon} ${escapeHtml(g.name)} · started ${fmtDate(sub.createdAt)}</p></div>
-    <div class="detail-card">
-      <div class="detail-avatar" style="background:${c.bg};color:${c.hex}">${streak>0?'🔥':'—'}</div>
-      <div class="detail-name">${streak} day streak</div>
-      <div class="detail-type" style="color:${c.hex}">Longest: ${longest} days · ${consistency}% consistency</div>
-      <div class="week-strip">${weekHtml}</div>
-    </div>
-    <div class="detail-list">
-      <div class="detail-row"><span class="detail-label">Main Goal</span><span class="detail-value">${g.icon} ${escapeHtml(g.name)}</span></div>
-      <div class="detail-row"><span class="detail-label">Total completions</span><span class="detail-value">${total}</span></div>
-      <div class="detail-row"><span class="detail-label">Started</span><span class="detail-value">${fmtDate(sub.createdAt)}</span></div>
-      ${sub.notes ? `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${escapeHtml(sub.notes)}</span></div>` : ''}
-    </div>
-    <div class="detail-actions">
-      <button class="btn-cancel" id="detailEditBtn" style="flex:1;">Edit</button>
-      <button class="btn-cancel" id="detailDeleteBtn" style="flex:1;color:var(--red);">Delete</button>
-    </div>
-  `;
-  document.getElementById('detailEditBtn').addEventListener('click', ()=> openEditSubForm(sub.id));
-  document.getElementById('detailDeleteBtn').addEventListener('click', ()=>{
-    if(confirm('Delete "'+sub.name+'" and all its history?')) deleteSub(sub.id);
-  });
-}
-
-/* ---------- action sheet (shared for goal / sub) ---------- */
-function openActionSheet(id, type){
+/* ---------- action sheet ---------- */
+function openActionSheet(id){
   actionTargetId = id;
-  actionTargetType = type;
-  if(type==='goal'){
-    const g = findGoal(id);
-    document.getElementById('actionTitle').textContent = 'Manage goal';
-    document.getElementById('actionSub').textContent = g ? g.name : '';
-    document.getElementById('actionEditLabel').textContent = 'Edit Main Goal';
-    document.getElementById('actionEditSub').textContent = 'Change the name, icon, or color';
-    document.getElementById('actionDeleteLabel').textContent = 'Delete Main Goal';
-    document.getElementById('actionDeleteSub').textContent = 'Removes it and every sub-goal under it';
-  } else {
-    const found = findSub(id);
-    document.getElementById('actionTitle').textContent = 'Manage sub-goal';
-    document.getElementById('actionSub').textContent = found ? found.sub.name : '';
-    document.getElementById('actionEditLabel').textContent = 'Edit sub-goal';
-    document.getElementById('actionEditSub').textContent = 'Change the name, goal, or notes';
-    document.getElementById('actionDeleteLabel').textContent = 'Delete sub-goal';
-    document.getElementById('actionDeleteSub').textContent = 'Removes it and all its history';
-  }
+  const g = findGoal(id);
+  document.getElementById('actionTitle').textContent = 'Manage goal';
+  document.getElementById('actionSub').textContent = g ? g.name : '';
   showOverlay('actionOverlay');
 }
 
@@ -889,18 +772,16 @@ function importBackup(file){
     try{
       const data = JSON.parse(e.target.result);
       if(Array.isArray(data.goals)){
-        goals = data.goals;
+        // support both flat goals and legacy Main Goal / Sub-Goal backups
+        const hasSubgoals = data.goals.some(g=>Array.isArray(g.subgoals));
+        goals = hasSubgoals ? flattenLegacyGoals(data.goals) : data.goals;
         if(data.settings) settings = Object.assign(settings, data.settings);
         saveGoals(); saveSettings(); applySettings();
         toast('Backup restored');
         renderCurrentPage();
       } else if(Array.isArray(data.habits)){
-        // legacy single-goal backup
-        const migrated = { id:'g_'+Date.now(), name:'General', icon:'🎯', colorIdx:0, createdAt: todayStr(), subgoals:[] };
-        data.habits.forEach(h=>{
-          migrated.subgoals.push({ id: h.id || ('s_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)), name: h.name, notes: h.notes||'', createdAt: h.createdAt||todayStr(), log: h.log||{} });
-        });
-        goals = [migrated];
+        // legacy single-list habit backup
+        goals = data.habits.map((h,i)=>({ id: h.id || ('g_'+Date.now()+'_'+i), name: h.name, icon: h.icon || ICONS[i % ICONS.length], colorIdx: h.colorIdx!=null ? h.colorIdx : (i % COLORS.length), createdAt: h.createdAt||todayStr(), notes: h.notes||'', log: h.log||{} }));
         if(data.settings) settings = Object.assign(settings, data.settings);
         saveGoals(); saveSettings(); applySettings();
         toast('Legacy backup restored');
@@ -917,34 +798,22 @@ function applySettings(){
   document.body.className = document.body.className.replace(/fs-\w+/g,'').trim();
   document.body.classList.add('fs-'+settings.fontSize);
   document.getElementById('darkToggle').classList.toggle('on', settings.dark);
-  document.querySelectorAll('.seg-btn').forEach(b=> b.classList.toggle('active', b.dataset.fs===settings.fontSize));
-  document.getElementById('eyeBtn').style.opacity = settings.hideNumbers ? '0.6':'1';
+  document.querySelectorAll('.seg-btn[data-fs]').forEach(b=> b.classList.toggle('active', b.dataset.fs===settings.fontSize));
 }
 
 /* ---------- init & events ---------- */
-document.getElementById('fabBtn').addEventListener('click', openAddChoice);
-document.getElementById('addChoiceCancel').addEventListener('click', ()=>hideOverlay('addChoiceOverlay'));
-document.getElementById('choiceNewGoal').addEventListener('click', ()=>{ hideOverlay('addChoiceOverlay'); openAddGoalForm(); });
-document.getElementById('choiceNewSub').addEventListener('click', ()=>{ hideOverlay('addChoiceOverlay'); openAddSubForm(currentFilter!=='all'?currentFilter:null); });
+document.getElementById('fabBtn').addEventListener('click', openAddGoalForm);
 
 document.getElementById('goalFormCancel').addEventListener('click', ()=>hideOverlay('goalFormOverlay'));
 document.getElementById('goalFormSave').addEventListener('click', saveGoalForm);
 
-document.getElementById('subFormCancel').addEventListener('click', ()=>hideOverlay('subFormOverlay'));
-document.getElementById('subFormSave').addEventListener('click', saveSubForm);
-
 document.getElementById('actionEdit').addEventListener('click', ()=>{
   hideOverlay('actionOverlay');
-  if(actionTargetType==='goal') openEditGoalForm(actionTargetId); else openEditSubForm(actionTargetId);
+  openEditGoalForm(actionTargetId);
 });
 document.getElementById('actionDelete').addEventListener('click', ()=>{
-  if(actionTargetType==='goal'){
-    const g = findGoal(actionTargetId);
-    if(g && confirm('Delete "'+g.name+'" and every sub-goal under it?')) deleteGoal(actionTargetId);
-  } else {
-    const found = findSub(actionTargetId);
-    if(found && confirm('Delete "'+found.sub.name+'" and all its history?')) deleteSub(actionTargetId);
-  }
+  const g = findGoal(actionTargetId);
+  if(g && confirm('Delete "'+g.name+'" and all its history?')) deleteGoal(actionTargetId);
 });
 document.getElementById('actionCancel').addEventListener('click', ()=>hideOverlay('actionOverlay'));
 
@@ -952,12 +821,7 @@ document.getElementById('settingsBtn').addEventListener('click', ()=>showOverlay
 document.getElementById('moreSettingsBtn').addEventListener('click', ()=>showOverlay('settingsOverlay'));
 document.getElementById('settingsClose').addEventListener('click', ()=>hideOverlay('settingsOverlay'));
 document.getElementById('darkToggle').addEventListener('click', ()=>{ settings.dark=!settings.dark; saveSettings(); applySettings(); renderCurrentPage(); });
-document.querySelectorAll('.seg-btn').forEach(b=> b.addEventListener('click', ()=>{ settings.fontSize=b.dataset.fs; saveSettings(); applySettings(); }));
-
-document.getElementById('filterPickerBtn').addEventListener('click', ()=>{ syncFilterOptions(); showOverlay('filterOverlay'); });
-document.getElementById('filtersBtn').addEventListener('click', ()=>{ syncFilterOptions(); showOverlay('filterOverlay'); });
-document.getElementById('filterCloseX').addEventListener('click', ()=>hideOverlay('filterOverlay'));
-document.getElementById('filterClearBtn').addEventListener('click', ()=>{ currentFilter='all'; hideOverlay('filterOverlay'); renderToday(); });
+document.querySelectorAll('.seg-btn[data-fs]').forEach(b=> b.addEventListener('click', ()=>{ settings.fontSize=b.dataset.fs; saveSettings(); applySettings(); }));
 
 document.getElementById('sortBtn').addEventListener('click', ()=>showOverlay('sortOverlay'));
 document.getElementById('sortCloseX').addEventListener('click', ()=>hideOverlay('sortOverlay'));
@@ -966,18 +830,29 @@ document.querySelectorAll('[data-sort-radio]').forEach(r=>{
 });
 function syncSortRadios(){ document.querySelectorAll('[data-sort-radio]').forEach(r=> r.checked = r.dataset.sortRadio===currentSort); }
 
-document.getElementById('eyeBtn').addEventListener('click', ()=>{ settings.hideNumbers=!settings.hideNumbers; saveSettings(); applySettings(); renderToday(); });
-document.getElementById('bellBtn').addEventListener('click', ()=> toast("Set a daily reminder in your phone's clock app"));
+/* ---------- new-goal form: type toggle / target-type toggle / reminder ---------- */
+document.querySelectorAll('#typeToggle .seg-btn').forEach(b=> b.addEventListener('click', ()=> setTypeToggle(b.dataset.type)));
+document.querySelectorAll('#targetTypeToggle .seg-btn').forEach(b=> b.addEventListener('click', ()=> setTargetTypeToggle(b.dataset.targetType)));
+document.getElementById('gReminderToggle').addEventListener('click', ()=>{
+  const on = !document.getElementById('gReminderToggle').classList.contains('on');
+  document.getElementById('gReminderToggle').classList.toggle('on', on);
+  document.getElementById('reminderTimeField').style.display = on ? 'block' : 'none';
+  if(on) ensureNotificationPermission();
+});
+
+/* ---------- measurable value-entry sheet ---------- */
+document.getElementById('measureCancel').addEventListener('click', ()=>hideOverlay('measureOverlay'));
+document.getElementById('measureSave').addEventListener('click', saveMeasureEntry);
+document.getElementById('measureClear').addEventListener('click', clearMeasureEntry);
 
 document.querySelectorAll('.nav-item').forEach(n=> n.addEventListener('click', ()=> switchPage(n.dataset.page)));
-document.getElementById('detailBackBtn').addEventListener('click', ()=> switchPage(detailBackTarget || 'today'));
-document.getElementById('goalDetailBackBtn').addEventListener('click', ()=> switchPage(goalDetailReturnPage || 'pillars'));
+document.getElementById('goalDetailBackBtn').addEventListener('click', ()=> switchPage(goalDetailReturnPage || 'today'));
 
 document.getElementById('moreExportBtn').addEventListener('click', exportBackup);
 document.getElementById('moreImportBtn').addEventListener('click', ()=> document.getElementById('importFile').click());
 document.getElementById('importFile').addEventListener('change', e=>{ if(e.target.files[0]) importBackup(e.target.files[0]); e.target.value=''; });
 document.getElementById('moreResetBtn').addEventListener('click', ()=>{
-  if(confirm('Clear every goal, sub-goal, and all history? This cannot be undone.')){
+  if(confirm('Clear every goal and all history? This cannot be undone.')){
     goals = []; saveGoals(); toast('All data cleared'); renderCurrentPage();
   }
 });
@@ -987,10 +862,41 @@ document.querySelectorAll('.overlay').forEach(ov=>{
   ov.addEventListener('click', e=>{ if(e.target===ov) ov.classList.remove('show'); });
 });
 
+/* ---------- daily reminders ---------- */
+function ensureNotificationPermission(){
+  if('Notification' in window && Notification.permission==='default'){
+    Notification.requestPermission();
+  }
+}
+function notifyReminder(g){
+  const msg = `Don't forget to log "${g.name}" today`;
+  if('Notification' in window && Notification.permission==='granted'){
+    try{ new Notification('Foundation', { body: msg, icon: 'assets/icons/icon-192.png' }); }
+    catch(e){ toast(msg); }
+  } else {
+    toast(msg);
+  }
+}
+function checkReminders(){
+  const now = new Date();
+  const cur = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  const today = todayStr();
+  goals.forEach(g=>{
+    if(!g.reminderOn || !g.reminderTime || g.reminderTime!==cur) return;
+    const key = g.id+'_'+today;
+    if(notifiedReminders[key]) return;
+    if(isDone(g, today)) return;
+    notifiedReminders[key] = true;
+    notifyReminder(g);
+  });
+}
+
 (async function init(){
   await loadAll();
   applySettings();
   syncSortRadios();
   document.querySelector('[data-sort-radio="streak-desc"]').checked = true;
   switchPage('today');
+  if(goals.some(g=>g.reminderOn)) ensureNotificationPermission();
+  setInterval(checkReminders, 20000);
 })();

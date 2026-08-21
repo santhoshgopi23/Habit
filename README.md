@@ -1,14 +1,14 @@
 # Foundation — Personal Growth System Tracker
 
-A private, mobile-first system tracker. Instead of tracking one flat list of habits, you build **Main Goals** (e.g. "Get Fit", "Save Money") and break each one into independently-trackable **Sub-Goals** (e.g. "Exercise daily for 30 minutes", "No junk food", "No sugar"). Each day you mark every sub-goal green (done) or red (not done), and the app rolls that up into a consistency percentage per goal and for your whole system.
+A private, mobile-first goal tracker. You add simple, daily-trackable **Goals** (e.g. "Exercise daily for 30 minutes", "No junk food", "Read 20 pages"). Each day you mark every goal green (done) or red (not done), and the app rolls that up into a consistency percentage per goal and for your whole system.
 
 ## How it works
 
-- **Today page** — your overall Consistency Rate, Current Streak, and Best Streak sit at the top. Below that, each Main Goal appears as its own expandable section showing its sub-goals and its own consistency %.
-- **Add** (the `+` button) — choose "New Main Goal" or "New Sub-Goal". You can also tap the small `+` on any goal's header to add a sub-goal straight into that goal.
-- **Tap a sub-goal's status circle** to mark it done (green) or not done (red) for today. Tap the sub-goal's name to see its streak history and details.
-- **Progress page** — a 7-day completion chart and every sub-goal's current streak, across your whole system.
-- **Goals page** — an overview of all Main Goals with an all-time completions breakdown.
+- **Today page** — your overall Consistency Rate, Current Streak, and Best Streak sit at the top. Below that, every goal appears in a single flat list with its own streak and consistency %.
+- **Add** (the `+` button) — creates a new Goal with a name, icon, color, and optional notes.
+- **Tap a goal's status circle** to mark it done (green) or not done (red) for today. Tap the goal's name to see its full streak history, charts, and details.
+- **Progress page** — a 7-day completion chart and every goal's current streak, across your whole system.
+- **Goals page** — an overview of all your goals with an all-time completions breakdown.
 
 ## What's in this folder
 
@@ -36,9 +36,11 @@ favicon.svg / .png      → browser tab icon
 
 ## Your data
 
-All habits and settings are stored only on this device, in this browser's local storage — there's no server, no account, no tracking. That means:
+All goals and settings are stored only on this device, in this browser's local storage — there's no server, no account, no tracking. That means:
 - Data is tied to **this specific browser** on **this specific device**. Opening the site in a different browser (or a private/incognito window) starts fresh.
 - Clearing your browser's site data/cookies for this page will erase it.
 - Use **More → Export backup** regularly to save a `.json` copy, and **Import backup** to restore it — this is also how you move your data to another device or browser.
+
+If you're upgrading from an earlier version of Foundation that had Main Goals and Sub-Goals, your existing data is automatically flattened into simple Goals the first time you open the app — nothing is lost.
 
 If you open `index.html` straight from your file system in a browser that restricts local storage on `file://` pages, saving may not work — in that case, host the folder (see above) and use the hosted URL instead.
