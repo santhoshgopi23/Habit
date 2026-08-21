@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Foundation — Your Personal Growth System</title>
+<meta name="description" content="Foundation is a private system tracker. Build Main Goals, break them into Sub-Goals, and track your consistency every day — all data stays on your device.">
+<meta name="theme-color" content="#2D6A4A">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<div class="statusbar"><span>Foundation</span><span>●●●</span></div>
+<div class="toprow">
+  <div class="toprow-left" id="filterPickerBtn"><span class="dot"></span> <span id="filterPickerLabel">All Goals</span> ▾</div>
+  <div class="toprow-icons">
+    <button class="icon-btn" id="eyeBtn" title="Hide numbers">👁</button>
+    <button class="icon-btn" id="bellBtn" title="Reminders">🔔</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="head-row">
+    <div class="head-title">
+      <h1>Today</h1>
+      <p id="habitCount">0 sub-goals · 0 goals</p>
+    </div>
+    <div class="head-actions">
+      <div class="sq-btn" id="settingsBtn" title="Settings">⚙</div>
+    </div>
+  </div>
+
+  <!-- TODAY PAGE -->
+  <div class="page active" id="page-today">
+
+    <div class="summary-card">
+      <div class="consistency-hero">
+        <div class="consistency-ring" id="consistencyRing">
+          <div class="consistency-hole">
+            <div class="cr-value" id="consistencyValue">0%</div>
+            <div class="cr-label">Consistency</div>
+          </div>
+        </div>
+        <div class="consistency-stats">
+          <div class="cstat"><div class="label">Today</div><div class="value blur-num" id="sumToday">0/0</div></div>
+          <div class="cstat"><div class="label">Current Streak</div><div class="value blur-num" id="curStreak">0 days</div></div>
+          <div class="cstat"><div class="label">Best Streak</div><div class="value blur-num" id="bestStreak">0 days</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-row">
+      <button class="filters-btn" id="filtersBtn">☰ Filter</button>
+      <button class="sort-btn" id="sortBtn">↕</button>
+    </div>
+
+    <div id="lists"></div>
+  </div>
+
+  <!-- PROGRESS PAGE -->
+  <div class="page" id="page-progress">
+    <div class="head-row" style="margin-top:20px;">
+      <div class="head-title"><h1 style="font-size:22px;">Progress</h1><p>Your last 7 days</p></div>
+    </div>
+    <div id="progressContent"></div>
+  </div>
+
+  <!-- GOALS PAGE -->
+  <div class="page" id="page-pillars">
+    <div class="head-row" style="margin-top:20px;">
+      <div class="head-title"><h1 style="font-size:22px;">Goals</h1><p>Where your consistency lives</p></div>
+    </div>
+    <div id="pillarsContent"></div>
+  </div>
+
+  <!-- DETAIL PAGE (sub-goal) -->
+  <div class="page" id="page-detail">
+    <div class="detail-topbar">
+      <button class="back-btn" id="detailBackBtn">← Back</button>
+    </div>
+    <div id="detailContent"></div>
+  </div>
+
+  <!-- GOAL DETAIL PAGE (main goal) -->
+  <div class="page" id="page-goal-detail">
+    <div class="detail-topbar">
+      <button class="back-btn" id="goalDetailBackBtn">← Back</button>
+    </div>
+    <div id="goalDetailContent"></div>
+  </div>
+
+  <!-- MORE PAGE -->
+  <div class="page" id="page-more">
+    <div class="head-row" style="margin-top:20px;">
+      <div class="head-title"><h1 style="font-size:22px;">More</h1><p>Settings and your data</p></div>
+    </div>
+    <div style="margin-top:16px;">
+      <button class="settings-menu-btn" id="moreSettingsBtn"><span class="mi">⚙</span> Appearance</button>
+      <button class="settings-menu-btn" id="moreExportBtn"><span class="mi">⇩</span> Export backup (.json)</button>
+      <button class="settings-menu-btn" id="moreImportBtn"><span class="mi">⇧</span> Import backup</button>
+      <button class="settings-menu-btn danger" id="moreResetBtn"><span class="mi">⟲</span> Reset all data</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none;">
+    </div>
+    <p style="font-size:12.5px;color:var(--gray);text-align:center;margin-top:24px;line-height:1.6;">
+      Everything here lives only on this device.<br>Missing a day doesn't erase the ones before it.
+    </p>
+  </div>
+</div>
+
+<button class="fab" id="fabBtn">+</button>
+
+<div class="bottomnav">
+  <div class="nav-item active" data-page="today"><span>▦</span>Today</div>
+  <div class="nav-item" data-page="progress"><span>📈</span>Progress</div>
+  <div class="nav-item" data-page="pillars"><span>🧭</span>Goals</div>
+  <div class="nav-item" data-page="more"><span>⋯</span>More</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- settings sheet -->
+<div class="overlay" id="settingsOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2>Settings</h2>
+    <p class="sheet-sub">Customize how Foundation looks</p>
+    <div class="settings-section">
+      <div class="settings-label">Appearance</div>
+      <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:10px;">
+        <div class="settings-row-text"><strong>Text size</strong><span>Adjust size across the app</span></div>
+        <div class="seg-control">
+          <button class="seg-btn" data-fs="xsmall">X-Small</button>
+          <button class="seg-btn" data-fs="small">Small</button>
+          <button class="seg-btn active" data-fs="medium">Medium</button>
+          <button class="seg-btn" data-fs="large">Large</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-text"><strong>Dark mode</strong><span>Easier on the eyes at night</span></div>
+        <button class="toggle-switch" id="darkToggle"><span class="knob"></span></button>
+      </div>
+    </div>
+    <button class="btn-cancel" id="settingsClose" style="width:100%;">Close</button>
+  </div>
+</div>
+
+<!-- add chooser sheet -->
+<div class="overlay" id="addChoiceOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2>Add to your system</h2>
+    <p class="sheet-sub">What would you like to create?</p>
+    <button class="choice-btn" id="choiceNewGoal">
+      <div class="choice-icon goal">🎯</div>
+      <div class="choice-text"><strong>New Main Goal</strong><span>A big outcome, e.g. "Get Fit"</span></div>
+    </button>
+    <button class="choice-btn" id="choiceNewSub">
+      <div class="choice-icon sub">✓</div>
+      <div class="choice-text"><strong>New Sub-Goal</strong><span>A daily action under a Main Goal</span></div>
+    </button>
+    <button class="btn-cancel" id="addChoiceCancel" style="width:100%;">Cancel</button>
+  </div>
+</div>
+
+<!-- add/edit MAIN GOAL sheet -->
+<div class="overlay" id="goalFormOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 id="goalFormTitle">New Main Goal</h2>
+    <p class="sheet-sub" id="goalFormSub">The big outcome you're working toward.</p>
+
+    <div class="field">
+      <label>Goal name</label>
+      <input type="text" id="gName" placeholder="e.g. Get Fit" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Icon</label>
+      <div class="icon-picker" id="iconPicker"></div>
+    </div>
+    <div class="field">
+      <label>Color</label>
+      <div class="color-picker" id="colorPicker"></div>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="goalFormCancel">Cancel</button>
+      <button class="btn-save" id="goalFormSave">Save goal</button>
+    </div>
+  </div>
+</div>
+
+<!-- add/edit SUB-GOAL sheet -->
+<div class="overlay" id="subFormOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 id="subFormTitle">New Sub-Goal</h2>
+    <p class="sheet-sub" id="subFormSub">One small, daily-trackable action.</p>
+
+    <div class="field" id="subGoalPickerField">
+      <label>Under which Main Goal?</label>
+      <div class="goal-chip-row" id="goalChipRow"></div>
+    </div>
+    <div class="field">
+      <label>Sub-goal</label>
+      <input type="text" id="sName" placeholder="e.g. Exercise daily for 30 minutes" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Notes (optional)</label>
+      <textarea id="sNotes" placeholder="Why this matters, or how you'll do it…"></textarea>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="subFormCancel">Cancel</button>
+      <button class="btn-save" id="subFormSave">Save sub-goal</button>
+    </div>
+  </div>
+</div>
+
+<!-- entry action sheet (edit / delete) — shared for goals & sub-goals -->
+<div class="overlay" id="actionOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 id="actionTitle">Manage</h2>
+    <p class="sheet-sub" id="actionSub"></p>
+    <button class="choice-btn" id="actionEdit">
+      <div class="choice-icon edit">✎</div>
+      <div class="choice-text"><strong id="actionEditLabel">Edit</strong><span id="actionEditSub">Change the name or details</span></div>
+    </button>
+    <button class="choice-btn" id="actionDelete">
+      <div class="choice-icon delete">🗑</div>
+      <div class="choice-text"><strong id="actionDeleteLabel">Delete</strong><span id="actionDeleteSub">Removes it and all its history</span></div>
+    </button>
+    <button class="btn-cancel" id="actionCancel" style="width:100%;">Cancel</button>
+  </div>
+</div>
+
+<!-- filter sheet -->
+<div class="overlay" id="filterOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header-row">
+      <h2>Filter goals</h2>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="clear-link" id="filterClearBtn">Clear</button>
+        <button class="sheet-x" id="filterCloseX" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <p class="sheet-sub">Choose which Main Goal to show</p>
+    <div class="check-list" id="filterOptions"></div>
+  </div>
+</div>
+
+<!-- sort sheet -->
+<div class="overlay" id="sortOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header-row">
+      <h2>Sort sub-goals</h2>
+      <button class="sheet-x" id="sortCloseX" aria-label="Close">✕</button>
+    </div>
+    <p class="sheet-sub">Choose how to order each section</p>
+    <div class="check-list" id="sortOptions">
+      <label class="check-row"><input type="radio" name="sortRadio" data-sort-radio="streak-desc"><span class="radio-box"></span><span class="check-label">Streak: High to Low</span></label>
+      <label class="check-row"><input type="radio" name="sortRadio" data-sort-radio="streak-asc"><span class="radio-box"></span><span class="check-label">Streak: Low to High</span></label>
+      <label class="check-row"><input type="radio" name="sortRadio" data-sort-radio="name-asc"><span class="radio-box"></span><span class="check-label">Name A–Z</span></label>
+      <label class="check-row"><input type="radio" name="sortRadio" data-sort-radio="created-asc"><span class="radio-box"></span><span class="check-label">Oldest first</span></label>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+</body>
+</html>
