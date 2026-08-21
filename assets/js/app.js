@@ -31,33 +31,48 @@ let detailBackTarget = 'today';
 let detailGoalId = null;
 let goalDetailReturnPage = 'pillars';
 
-/* ---------- storage ---------- */
+/* ---------- storage (browser localStorage — persists on this device/browser) ---------- */
+let storageAvailable = true;
+function checkStorage(){
+  try{ const k='__fnd_test__'; localStorage.setItem(k,'1'); localStorage.removeItem(k); return true; }
+  catch(e){ return false; }
+}
 async function loadAll(){
-  try{ const r = await window.storage.get(GOALS_KEY, false); goals = r ? JSON.parse(r.value) : []; }
+  storageAvailable = checkStorage();
+  if(!storageAvailable){ goals = []; return; }
+  try{ const raw = localStorage.getItem(GOALS_KEY); goals = raw ? JSON.parse(raw) : []; }
   catch(e){ goals = []; }
-  try{ const r = await window.storage.get(SETTINGS_KEY, false); if(r) settings = Object.assign(settings, JSON.parse(r.value)); }
+  try{ const raw = localStorage.getItem(SETTINGS_KEY); if(raw) settings = Object.assign(settings, JSON.parse(raw)); }
   catch(e){ /* defaults */ }
 
   // one-time migration from the old single-goal habit tracker, if present and nothing new yet
   if(goals.length===0){
     try{
-      const r = await window.storage.get(OLD_HABITS_KEY, false);
-      if(r){
-        const oldHabits = JSON.parse(r.value);
+      const raw = localStorage.getItem(OLD_HABITS_KEY);
+      if(raw){
+        const oldHabits = JSON.parse(raw);
         if(Array.isArray(oldHabits) && oldHabits.length){
           const migrated = { id:'g_'+Date.now(), name:'General', icon:'🎯', colorIdx:0, createdAt: todayStr(), subgoals:[] };
           oldHabits.forEach(h=>{
             migrated.subgoals.push({ id: h.id || ('s_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)), name: h.name, notes: h.notes||'', createdAt: h.createdAt||todayStr(), log: h.log||{} });
           });
           goals = [migrated];
-          await saveGoals();
+          saveGoals();
         }
       }
     }catch(e){ /* no old data, ignore */ }
   }
 }
-async function saveGoals(){ try{ await window.storage.set(GOALS_KEY, JSON.stringify(goals), false); }catch(e){ console.error(e); } }
-async function saveSettings(){ try{ await window.storage.set(SETTINGS_KEY, JSON.stringify(settings), false); }catch(e){ console.error(e); } }
+function saveGoals(){
+  if(!storageAvailable) return;
+  try{ localStorage.setItem(GOALS_KEY, JSON.stringify(goals)); }
+  catch(e){ console.error(e); storageAvailable=false; toast("Couldn't save — storage full or blocked"); }
+}
+function saveSettings(){
+  if(!storageAvailable) return;
+  try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+  catch(e){ console.error(e); }
+}
 
 /* ---------- date helpers ---------- */
 function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }

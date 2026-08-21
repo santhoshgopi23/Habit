@@ -36,4 +36,9 @@ favicon.svg / .png      → browser tab icon
 
 ## Your data
 
-All habits and settings are stored only on the device you use — there's no server, no account, no tracking. Use **More → Export backup** to save a `.json` copy, and **Import backup** to restore it on another device.
+All habits and settings are stored only on this device, in this browser's local storage — there's no server, no account, no tracking. That means:
+- Data is tied to **this specific browser** on **this specific device**. Opening the site in a different browser (or a private/incognito window) starts fresh.
+- Clearing your browser's site data/cookies for this page will erase it.
+- Use **More → Export backup** regularly to save a `.json` copy, and **Import backup** to restore it — this is also how you move your data to another device or browser.
+
+If you open `index.html` straight from your file system in a browser that restricts local storage on `file://` pages, saving may not work — in that case, host the folder (see above) and use the hosted URL instead.
