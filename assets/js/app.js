@@ -261,6 +261,15 @@ function goalPerfectDays(goal, days){
   for(let i=0;i<days;i++){ if(dayStats(goal, dateNDaysAgo(i)).full) count++; }
   return count;
 }
+const REDHEX = '#C0392B';
+function goalMeasurableTotal(goal){
+  if(goal.type!=='measurable') return 0;
+  return Object.values(goal.log).reduce((s,v)=> s + (typeof v==='number' ? v : 0), 0);
+}
+function goalMeasurableOverDays(goal){
+  if(goal.type!=='measurable') return 0;
+  return Object.keys(goal.log).filter(k=> typeof goal.log[k]==='number' && !isDoneValue(goal, goal.log[k])).length;
+}
 function hexToRgba(hex, alpha){
   const h = hex.replace('#','');
   const r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
@@ -485,7 +494,8 @@ function renderToday(){
     const streak = computeStreak(g);
     const c = colorFor(g);
     const todayVal = g.log[todayStr()];
-    const valNote = (g.type==='measurable' && typeof todayVal==='number') ? ` · Today: ${todayVal}${g.unit?' '+g.unit:''}` : '';
+    const missedToday = g.type==='measurable' && typeof todayVal==='number' && !isDoneValue(g, todayVal);
+    const valNote = (g.type==='measurable' && typeof todayVal==='number') ? ` · <span class="${missedToday?'val-miss':''}">Today: ${todayVal}${g.unit?' '+g.unit:''}</span>` : '';
     const row = document.createElement('div');
     row.className = 'entry';
     row.innerHTML = `
@@ -670,13 +680,18 @@ function renderGoalCharts(g, c){
   const bestDay = weekday.length ? weekday.slice().sort((a,b)=>b.pct-a.pct)[0] : null;
   const perfect30 = goalPerfectDays(g, 30);
 
+  const isMeasurable = g.type==='measurable';
+
   const bv = d => {
     if(!d.eligible) return '';
-    if(g.type==='measurable') return (typeof d.value==='number') ? `${d.value}${g.unit?' '+g.unit:''}` : '—';
+    if(isMeasurable) return (typeof d.value==='number') ? `${d.value}${g.unit?' '+g.unit:''}` : '—';
     return d.done ? '✓' : '—';
   };
 
-  const dailyBody = daily.map(d=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${d.label}</span><span class="bv">${bv(d)}</span></div><div class="bar-track"><div class="bar-fill" style="width:${d.pct}%;background:${c.hex}"></div></div></div>`).join('');
+  const dailyBody = daily.map(d=>{
+    const missed = isMeasurable && typeof d.value==='number' && !d.done;
+    return `<div class="bar-row"><div class="bar-row-top"><span class="bn">${d.label}</span><span class="bv ${missed?'bv-miss':''}">${bv(d)}</span></div><div class="bar-track"><div class="bar-fill" style="width:${missed?100:d.pct}%;background:${missed?REDHEX:c.hex}"></div></div></div>`;
+  }).join('');
   const weeklyBody = weekly.map(w=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${w.label}</span><span class="bv">${w.pct}%</span></div><div class="bar-track"><div class="bar-fill" style="width:${w.pct}%;background:${c.hex}"></div></div></div>`).join('');
   const monthlyBody = monthly.map(m=>`<div class="bar-row"><div class="bar-row-top"><span class="bn">${m.label}</span><span class="bv">${m.pct}%</span></div><div class="bar-track"><div class="bar-fill" style="width:${m.pct}%;background:${c.hex}"></div></div></div>`).join('');
 
@@ -707,9 +722,19 @@ function renderGoalCharts(g, c){
       ${heatRows.map(row=>`<div class="heatmap-row">${row.map(cell=>{
         const isFuture = cell.date > todayStr();
         const noData = cell.eligible===0;
+        const hasValue = typeof cell.value==='number';
+        const missedLogged = isMeasurable && !noData && hasValue && !cell.done;
         let style = 'background:#EEEAE0;';
-        if(!isFuture && !noData) style = `background:${hexToRgba(c.hex, cell.done ? 0.9 : 0.12)};`;
-        const title = isFuture ? '' : (noData ? `${fmtDate(cell.date)}: not started yet` : `${fmtDate(cell.date)}: ${cell.done ? 'done' : 'not done'}`);
+        if(!isFuture && !noData){
+          style = missedLogged ? `background:${hexToRgba(REDHEX, 0.8)};` : `background:${hexToRgba(c.hex, cell.done ? 0.9 : 0.12)};`;
+        }
+        let title = '';
+        if(!isFuture){
+          if(noData) title = `${fmtDate(cell.date)}: not started yet`;
+          else if(missedLogged) title = `${fmtDate(cell.date)}: ${cell.value}${g.unit?' '+g.unit:''} — over target`;
+          else if(isMeasurable && cell.done) title = `${fmtDate(cell.date)}: ${cell.value}${g.unit?' '+g.unit:''}`;
+          else title = `${fmtDate(cell.date)}: ${cell.done ? 'done' : 'not done'}`;
+        }
         return `<div class="heatmap-cell ${isFuture?'future':''}" style="${style}" title="${title}"></div>`;
       }).join('')}</div>`).join('')}
     </div>
@@ -718,12 +743,17 @@ function renderGoalCharts(g, c){
       <span class="heatmap-cell" style="background:${hexToRgba(c.hex,0.9)}"></span>
       <span>More</span>
     </div>
+    ${isMeasurable ? `<div class="heatmap-legend" style="margin-top:8px;"><span class="heatmap-cell" style="background:${hexToRgba(REDHEX,0.8)}"></span><span>Logged, over target</span></div>` : ''}
   </div>`;
 
   const insightCards = [];
   if(bestDay) insightCards.push({icon:'📅', label:'Best day of week', value:bestDay.name+'day', sub:bestDay.pct+'% completion'});
   insightCards.push({icon:'✅', label:'Perfect days', value:perfect30+' / 30', sub:'completed, last 30 days'});
   insightCards.push({icon:'📊', label:'Total completions', value:String(totalCompletions(g)), sub:'since you started'});
+  if(isMeasurable){
+    insightCards.push({icon:'🔢', label:'Total logged', value:`${goalMeasurableTotal(g)}${g.unit?' '+g.unit:''}`, sub:'sum of every entry, all-time'});
+    insightCards.push({icon:'⚠️', label:'Days over target', value:String(goalMeasurableOverDays(g)), sub:'logged, but missed the goal'});
+  }
 
   const insightHtml = `<div class="stat-card"><h3>Other useful analysis</h3>
     <div class="insight-grid">
