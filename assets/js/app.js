@@ -25,6 +25,7 @@ let currentPage = 'today';
 let detailGoalId = null;
 let goalDetailReturnPage = 'today';
 let measureTargetId = null;
+let measureTargetDate = null;
 let perfTab = 'daily';        // daily | weekly | monthly
 let historyRange = '12w';     // 1m | 12w | 3m | 1y
 let notifiedReminders = {};
@@ -137,6 +138,12 @@ function longestStreak(goal){
   return longest;
 }
 function totalCompletions(goal){ return Object.keys(goal.log).filter(k=>isDone(goal,k)).length; }
+function totalMeasurableSum(goal){
+  return Object.values(goal.log).reduce((s,v)=> s + (typeof v==='number' ? v : 0), 0);
+}
+function fmtNum(n){
+  return (Number.isInteger(n)) ? String(n) : (Math.round(n*100)/100).toString();
+}
 function consistency(goal){
   const pct = Math.round(totalCompletions(goal) / daysElapsedInclusive(goal.createdAt) * 100);
   return Math.min(100, Math.max(0, pct));
@@ -286,39 +293,46 @@ function toast(msg){
   toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
 }
 
-/* ---------- toggle today ---------- */
-function toggleGoalToday(id){
+/* ---------- toggle today / any date ---------- */
+function toggleGoalToday(id){ toggleGoalDate(id, todayStr()); }
+function toggleGoalDate(id, dateStr){
   const g = findGoal(id); if(!g) return;
-  if(g.type==='measurable'){ openMeasureEntry(id); return; }
-  const t = todayStr();
-  if(g.log[t]) delete g.log[t]; else g.log[t]=true;
+  if(dateStr > todayStr() || dateStr < g.createdAt) return;
+  if(g.type==='measurable'){ openMeasureEntry(id, dateStr); return; }
+  if(g.log[dateStr]) delete g.log[dateStr]; else g.log[dateStr]=true;
   saveGoals(); renderCurrentPage();
 }
 
 /* ---------- measurable value entry ---------- */
-function openMeasureEntry(id){
+function openMeasureEntry(id, dateStr){
   const g = findGoal(id); if(!g) return;
+  dateStr = dateStr || todayStr();
+  if(dateStr > todayStr() || dateStr < g.createdAt) return;
   measureTargetId = id;
+  measureTargetDate = dateStr;
+  const isToday = dateStr === todayStr();
   document.getElementById('measureTitle').textContent = g.name;
-  document.getElementById('measureSub').textContent = `Goal: ${g.targetType==='max'?'at most':'at least'} ${g.target}${g.unit?' '+g.unit:''}`;
-  document.getElementById('measureUnitLabel').textContent = g.unit ? `Today's value (${g.unit})` : "Today's value";
-  const existing = g.log[todayStr()];
+  document.getElementById('measureSub').textContent = `${isToday ? '' : fmtDate(dateStr)+' · '}Goal: ${g.targetType==='max'?'at most':'at least'} ${g.target}${g.unit?' '+g.unit:''}`;
+  document.getElementById('measureUnitLabel').textContent = g.unit ? `${isToday?"Today's":"That day's"} value (${g.unit})` : (isToday ? "Today's value" : "That day's value");
+  const existing = g.log[dateStr];
   document.getElementById('measureValue').value = (typeof existing==='number') ? existing : '';
   showOverlay('measureOverlay');
 }
 function saveMeasureEntry(){
   const g = findGoal(measureTargetId); if(!g) return;
+  const d = measureTargetDate || todayStr();
   const raw = document.getElementById('measureValue').value;
   const v = parseFloat(raw);
   if(raw===''||isNaN(v)){ toast('Enter a number'); return; }
-  g.log[todayStr()] = v;
+  g.log[d] = v;
   saveGoals();
   hideOverlay('measureOverlay');
   renderCurrentPage();
 }
 function clearMeasureEntry(){
   const g = findGoal(measureTargetId); if(!g) return;
-  delete g.log[todayStr()];
+  const d = measureTargetDate || todayStr();
+  delete g.log[d];
   saveGoals();
   hideOverlay('measureOverlay');
   renderCurrentPage();
@@ -496,6 +510,7 @@ function renderToday(){
     const todayVal = g.log[todayStr()];
     const missedToday = g.type==='measurable' && typeof todayVal==='number' && !isDoneValue(g, todayVal);
     const valNote = (g.type==='measurable' && typeof todayVal==='number') ? ` · <span class="${missedToday?'val-miss':''}">Today: ${todayVal}${g.unit?' '+g.unit:''}</span>` : '';
+    const totalNote = g.type==='measurable' ? `Total: ${fmtNum(totalMeasurableSum(g))}${g.unit?' '+g.unit:''}` : '';
     const row = document.createElement('div');
     row.className = 'entry';
     row.innerHTML = `
@@ -507,14 +522,37 @@ function renderToday(){
       <div class="entry-main" data-open="${g.id}">
         <div class="entry-name">${escapeHtml(g.name)}</div>
         <div class="entry-sub">${streak>0 ? '🔥 '+streak+'-day streak' : 'Start today'} · ${consistency(g)}% consistency${valNote}</div>
+        ${totalNote ? `<div class="entry-sub2">${totalNote}</div>` : ''}
       </div>
-      <button class="entry-menu" data-menu="${g.id}">⋯</button>
+      <button class="week-toggle" data-week="${g.id}" aria-label="Toggle 7-day view">▾</button>
     `;
     wrap.appendChild(row);
+
+    const strip = document.createElement('div');
+    strip.className = 'week-strip';
+    strip.id = 'week-'+g.id;
+    strip.innerHTML = last7Html(g);
+    wrap.appendChild(strip);
   });
   listsEl.appendChild(wrap);
 
   wireTodayEvents();
+}
+function last7Html(g){
+  let html = '<div class="week-boxes">';
+  for(let i=6;i>=0;i--){
+    const d = dateNDaysAgo(i);
+    const future = d > todayStr();
+    const before = d < g.createdAt;
+    const disabled = before || future;
+    let cls = 'week-box';
+    if(disabled) cls += ' week-box-empty';
+    else cls += isDone(g, d) ? ' week-box-yes' : ' week-box-no';
+    const label = new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'});
+    html += `<span class="${cls}" ${disabled?'':`data-editday="${g.id}" data-date="${d}"`} title="${label}"></span>`;
+  }
+  html += '</div>';
+  return html;
 }
 function wireTodayEvents(){
   document.querySelectorAll('[data-check]').forEach(el=>{
@@ -523,8 +561,19 @@ function wireTodayEvents(){
   document.querySelectorAll('[data-open]').forEach(el=>{
     el.addEventListener('click', ()=>{ openGoalDetail(el.dataset.open, 'today'); });
   });
-  document.querySelectorAll('[data-menu]').forEach(el=>{
-    el.addEventListener('click', e=>{ e.stopPropagation(); openActionSheet(el.dataset.menu); });
+  document.querySelectorAll('[data-week]').forEach(el=>{
+    el.addEventListener('click', e=>{
+      e.stopPropagation();
+      const strip = document.getElementById('week-'+el.dataset.week);
+      const open = strip.classList.toggle('open');
+      el.classList.toggle('open', open);
+    });
+  });
+  document.querySelectorAll('[data-editday]').forEach(el=>{
+    el.addEventListener('click', e=>{
+      e.stopPropagation();
+      toggleGoalDate(el.dataset.editday, el.dataset.date);
+    });
   });
 }
 
@@ -655,6 +704,7 @@ function renderGoalDetail(){
       <div class="detail-row"><span class="detail-label">Current streak</span><span class="detail-value">${streak} day${streak===1?'':'s'}</span></div>
       <div class="detail-row"><span class="detail-label">Best streak</span><span class="detail-value">${best} day${best===1?'':'s'}</span></div>
       <div class="detail-row"><span class="detail-label">Total completions</span><span class="detail-value">${total}</span></div>
+      ${g.type==='measurable' ? `<div class="detail-row"><span class="detail-label">Total ${g.unit||'logged'}</span><span class="detail-value">${fmtNum(totalMeasurableSum(g))}${g.unit?' '+g.unit:''}</span></div>` : ''}
       <div class="detail-row"><span class="detail-label">Started</span><span class="detail-value">${fmtDate(g.createdAt)}</span></div>
       ${g.notes ? `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${escapeHtml(g.notes)}</span></div>` : ''}
     </div>
