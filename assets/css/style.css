@@ -264,3 +264,37 @@ body.fs-large{zoom:1.12;}
   padding:11px 18px;border-radius:11px;font-size:13.5px;font-weight:600;z-index:60;opacity:0;pointer-events:none;transition:all .2s ease;}
 body.dark .toast{background:#3A403C;color:#fff;}
 .toast.show{opacity:1;transform:translate(-50%,0);}
+
+/* ---------- App Lock ---------- */
+.mi-status{margin-left:auto;font-size:12px;font-weight:700;color:var(--gray-light);}
+.mi-status.on{color:var(--green);}
+
+.lockscreen{position:fixed;inset:0;z-index:200;background:var(--cream);display:flex;align-items:center;justify-content:center;padding:24px;}
+body.dark .lockscreen{background:#20241F;}
+.lock-inner{width:100%;max-width:320px;text-align:center;display:flex;flex-direction:column;align-items:center;}
+.lock-icon{font-size:34px;margin-bottom:6px;}
+.lock-inner h2{margin:4px 0 2px;font-size:19px;font-weight:800;}
+.lock-sub{margin:0 0 18px;font-size:13px;color:var(--gray);}
+.lock-dots{display:flex;gap:14px;justify-content:center;margin-bottom:26px;}
+.lock-dot{width:13px;height:13px;border-radius:50%;background:var(--border);border:1.5px solid var(--border);transition:all .12s ease;}
+.lock-dot.filled{background:var(--green);border-color:var(--green);}
+.lock-dot.err{background:var(--red);border-color:var(--red);}
+.lock-dots.shake{animation:lockshake .35s ease;}
+@keyframes lockshake{
+  10%,90%{transform:translateX(-2px);} 20%,80%{transform:translateX(4px);}
+  30%,50%,70%{transform:translateX(-8px);} 40%,60%{transform:translateX(8px);}
+}
+.lock-keypad{display:grid;grid-template-columns:repeat(3,64px);gap:14px;justify-content:center;}
+.lock-key{width:64px;height:64px;border-radius:50%;border:1.5px solid var(--border);background:var(--white);font-size:20px;font-weight:700;color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.lock-key:active{background:var(--cream);}
+.lock-key-ghost{border:none;background:transparent;cursor:default;}
+.lock-key-del{font-size:17px;border:none;background:transparent;color:var(--gray);}
+body.dark .lock-key{background:#2A302A;border-color:#3A403C;color:#fff;}
+body.dark .lock-key-del{background:transparent;}
+.lock-forgot{margin-top:24px;background:none;border:none;color:var(--gray);font-size:13px;font-weight:600;text-decoration:underline;cursor:pointer;}
+.overlay.above-lock{z-index:210;}
+
+.lock-setup-pad{margin-top:6px;display:flex;flex-direction:column;align-items:center;}
+.lock-setup-pad .lock-dots{margin-bottom:20px;}
+.lock-setup-pad .lock-keypad{grid-template-columns:repeat(3,56px);gap:12px;}
+.lock-setup-pad .lock-key{width:56px;height:56px;font-size:18px;}

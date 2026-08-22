@@ -18,6 +18,33 @@
 </head>
 <body>
 
+<!-- APP LOCK SCREEN (shown over everything when a PIN is set) -->
+<div class="lockscreen" id="lockScreen" style="display:none;">
+  <div class="lock-inner">
+    <div class="lock-icon">🔒</div>
+    <h2 id="lockTitle">Enter PIN</h2>
+    <p class="lock-sub" id="lockSub">Foundation is locked</p>
+    <div class="lock-dots" id="lockDots">
+      <span class="lock-dot"></span><span class="lock-dot"></span><span class="lock-dot"></span><span class="lock-dot"></span>
+    </div>
+    <div class="lock-keypad" id="lockKeypad">
+      <button class="lock-key" data-key="1">1</button>
+      <button class="lock-key" data-key="2">2</button>
+      <button class="lock-key" data-key="3">3</button>
+      <button class="lock-key" data-key="4">4</button>
+      <button class="lock-key" data-key="5">5</button>
+      <button class="lock-key" data-key="6">6</button>
+      <button class="lock-key" data-key="7">7</button>
+      <button class="lock-key" data-key="8">8</button>
+      <button class="lock-key" data-key="9">9</button>
+      <button class="lock-key lock-key-ghost" disabled></button>
+      <button class="lock-key" data-key="0">0</button>
+      <button class="lock-key lock-key-del" id="lockDelBtn">⌫</button>
+    </div>
+    <button class="lock-forgot" id="lockForgotBtn">Forgot PIN?</button>
+  </div>
+</div>
+
 <div class="statusbar"><span>Foundation</span><span>●●●</span></div>
 <div class="toprow">
   <div class="toprow-left"><span class="dot"></span> Foundation</div>
@@ -92,6 +119,7 @@
     </div>
     <div style="margin-top:16px;">
       <button class="settings-menu-btn" id="moreSettingsBtn"><span class="mi">⚙</span> Appearance</button>
+      <button class="settings-menu-btn" id="moreLockBtn"><span class="mi">🔒</span> App Lock <span class="mi-status" id="lockStatusLabel">Off</span></button>
       <button class="settings-menu-btn" id="moreExportBtn"><span class="mi">⇩</span> Export backup (.json)</button>
       <button class="settings-menu-btn" id="moreImportBtn"><span class="mi">⇧</span> Import backup</button>
       <button class="settings-menu-btn danger" id="moreResetBtn"><span class="mi">⟲</span> Reset all data</button>
@@ -255,6 +283,61 @@
   </div>
 </div>
 
+<!-- App Lock setup sheet -->
+<div class="overlay" id="lockSetupOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 id="lockSetupTitle">App Lock</h2>
+    <p class="sheet-sub" id="lockSetupSub">Require a PIN to open Foundation</p>
+
+    <div class="settings-section" id="lockSetupMenu">
+      <div class="settings-row">
+        <div class="settings-row-text"><strong>Require PIN</strong><span>Lock the app when it's opened</span></div>
+        <button class="toggle-switch" id="lockToggle"><span class="knob"></span></button>
+      </div>
+      <div class="settings-row" id="lockChangeRow" style="display:none;">
+        <div class="settings-row-text"><strong>Change PIN</strong><span>Update your 4-digit PIN</span></div>
+        <button class="sort-btn" id="lockChangeBtn">Change</button>
+      </div>
+    </div>
+
+    <div class="lock-setup-pad" id="lockSetupPad" style="display:none;">
+      <p class="lock-sub" id="lockSetupStepLabel">Enter a new 4-digit PIN</p>
+      <div class="lock-dots" id="lockSetupDots">
+        <span class="lock-dot"></span><span class="lock-dot"></span><span class="lock-dot"></span><span class="lock-dot"></span>
+      </div>
+      <div class="lock-keypad" id="lockSetupKeypad">
+        <button class="lock-key" data-key="1">1</button>
+        <button class="lock-key" data-key="2">2</button>
+        <button class="lock-key" data-key="3">3</button>
+        <button class="lock-key" data-key="4">4</button>
+        <button class="lock-key" data-key="5">5</button>
+        <button class="lock-key" data-key="6">6</button>
+        <button class="lock-key" data-key="7">7</button>
+        <button class="lock-key" data-key="8">8</button>
+        <button class="lock-key" data-key="9">9</button>
+        <button class="lock-key lock-key-ghost" disabled></button>
+        <button class="lock-key" data-key="0">0</button>
+        <button class="lock-key lock-key-del" id="lockSetupDelBtn">⌫</button>
+      </div>
+    </div>
+
+    <button class="btn-cancel" id="lockSetupClose" style="width:100%;margin-top:14px;">Close</button>
+  </div>
+</div>
+
+<!-- forgot-PIN reset confirm -->
+<div class="overlay above-lock" id="lockResetConfirmOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2>Forgot your PIN?</h2>
+    <p class="sheet-sub">There's no way to recover a PIN — it's never sent anywhere. The only way back in is to erase all data on this device and start fresh.</p>
+    <button class="settings-menu-btn danger" id="lockResetConfirmBtn" style="width:100%;justify-content:center;margin-top:6px;">Erase all data &amp; remove lock</button>
+    <button class="btn-cancel" id="lockResetCancelBtn" style="width:100%;margin-top:10px;">Cancel</button>
+  </div>
+</div>
+
 <script src="assets/js/app.js"></script>
+
 </body>
 </html>

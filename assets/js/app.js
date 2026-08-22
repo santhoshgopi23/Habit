@@ -17,7 +17,7 @@ const SETTINGS_KEY = 'foundation_settings_v2';
 const OLD_HABITS_KEY = 'foundation_habits_v2';
 
 let goals = []; // [{id,name,icon,colorIdx,createdAt,notes,log:{},type,unit,targetType,target,reminderOn,reminderTime}]
-let settings = { dark:false, fontSize:'medium' };
+let settings = { dark:false, fontSize:'medium', lockEnabled:false, lockPin:null };
 let currentSort = 'streak-desc';
 let editingGoalId = null;
 let actionTargetId = null;
@@ -971,12 +971,219 @@ function checkReminders(){
   });
 }
 
+/* ---------- App Lock (PIN) ---------- */
+function hashPin(pin){
+  const salted = 'fnd_pin_v1_' + pin + '_salt';
+  let h = 5381;
+  for(let i=0;i<salted.length;i++){ h = ((h<<5)+h) + salted.charCodeAt(i); h |= 0; }
+  return String(h);
+}
+let lockEntry = '';
+let lockBusy = false;
+function isAppLocked(){ return !!(settings.lockEnabled && settings.lockPin); }
+function showLockScreen(){
+  document.getElementById('lockScreen').style.display = 'flex';
+  lockEntry = '';
+  renderLockDots('lockDots', 0, false);
+}
+function hideLockScreen(){
+  document.getElementById('lockScreen').style.display = 'none';
+}
+function renderLockDots(containerId, count, err){
+  const dots = document.querySelectorAll('#'+containerId+' .lock-dot');
+  dots.forEach((d,i)=>{
+    d.classList.toggle('filled', i<count && !err);
+    d.classList.toggle('err', err);
+  });
+}
+function shakeDots(containerId){
+  const el = document.getElementById(containerId);
+  el.classList.add('shake');
+  setTimeout(()=> el.classList.remove('shake'), 350);
+}
+document.querySelectorAll('#lockKeypad [data-key]').forEach(btn=>{
+  btn.addEventListener('click', ()=> handleLockDigit(btn.dataset.key));
+});
+document.getElementById('lockDelBtn').addEventListener('click', ()=>{
+  lockEntry = lockEntry.slice(0,-1);
+  renderLockDots('lockDots', lockEntry.length, false);
+});
+function handleLockDigit(d){
+  if(lockBusy || lockEntry.length>=4) return;
+  lockEntry += d;
+  renderLockDots('lockDots', lockEntry.length, false);
+  if(lockEntry.length===4){
+    lockBusy = true;
+    setTimeout(()=>{
+      if(hashPin(lockEntry)===settings.lockPin){
+        hideLockScreen();
+        lockEntry=''; lockBusy=false;
+      } else {
+        renderLockDots('lockDots', 4, true);
+        shakeDots('lockDots');
+        setTimeout(()=>{ lockEntry=''; renderLockDots('lockDots',0,false); lockBusy=false; }, 380);
+      }
+    }, 120);
+  }
+}
+document.getElementById('lockForgotBtn').addEventListener('click', ()=>{
+  showOverlay('lockResetConfirmOverlay');
+});
+document.getElementById('lockResetCancelBtn').addEventListener('click', ()=> hideOverlay('lockResetConfirmOverlay'));
+document.getElementById('lockResetConfirmBtn').addEventListener('click', ()=>{
+  try{
+    localStorage.removeItem(GOALS_KEY);
+    localStorage.removeItem(SETTINGS_KEY);
+    localStorage.removeItem(OLD_GOALS_KEY);
+    localStorage.removeItem(OLD_HABITS_KEY);
+  }catch(e){}
+  goals = [];
+  settings = { dark:false, fontSize:'medium', lockEnabled:false, lockPin:null };
+  applySettings();
+  updateLockStatusLabel();
+  hideOverlay('lockResetConfirmOverlay');
+  hideLockScreen();
+  switchPage('today');
+  toast('All data erased. Lock removed.');
+});
+
+/* ---------- App Lock setup sheet ---------- */
+let lockSetupEntry = '';
+let lockSetupStep = null; // 'create' | 'confirm-create' | 'remove-verify' | 'change-verify' | 'change-create' | 'change-confirm'
+let lockSetupPendingPin = null;
+
+function openLockSetup(){
+  document.getElementById('lockSetupTitle').textContent = 'App Lock';
+  document.getElementById('lockSetupSub').textContent = 'Require a PIN to open Foundation';
+  document.getElementById('lockToggle').classList.toggle('on', !!settings.lockEnabled);
+  document.getElementById('lockChangeRow').style.display = settings.lockEnabled ? 'flex' : 'none';
+  closeLockSetupPad();
+  showOverlay('lockSetupOverlay');
+}
+function closeLockSetupPad(){
+  lockSetupStep = null;
+  lockSetupEntry = '';
+  lockSetupPendingPin = null;
+  document.getElementById('lockSetupPad').style.display = 'none';
+  document.getElementById('lockSetupMenu').style.display = 'block';
+  renderLockDots('lockSetupDots', 0, false);
+}
+function beginLockSetupStep(step, label){
+  lockSetupStep = step;
+  lockSetupEntry = '';
+  document.getElementById('lockSetupStepLabel').textContent = label;
+  document.getElementById('lockSetupPad').style.display = 'flex';
+  document.getElementById('lockSetupMenu').style.display = 'none';
+  renderLockDots('lockSetupDots', 0, false);
+}
+document.getElementById('lockToggle').addEventListener('click', ()=>{
+  if(settings.lockEnabled){
+    beginLockSetupStep('remove-verify', 'Enter your PIN to turn off lock');
+  } else {
+    beginLockSetupStep('create', 'Choose a 4-digit PIN');
+  }
+});
+document.getElementById('lockChangeBtn').addEventListener('click', ()=>{
+  beginLockSetupStep('change-verify', 'Enter your current PIN');
+});
+document.querySelectorAll('#lockSetupKeypad [data-key]').forEach(btn=>{
+  btn.addEventListener('click', ()=> handleLockSetupDigit(btn.dataset.key));
+});
+document.getElementById('lockSetupDelBtn').addEventListener('click', ()=>{
+  lockSetupEntry = lockSetupEntry.slice(0,-1);
+  renderLockDots('lockSetupDots', lockSetupEntry.length, false);
+});
+function handleLockSetupDigit(d){
+  if(lockSetupEntry.length>=4) return;
+  lockSetupEntry += d;
+  renderLockDots('lockSetupDots', lockSetupEntry.length, false);
+  if(lockSetupEntry.length===4) processLockSetupEntry();
+}
+function processLockSetupEntry(){
+  const entered = lockSetupEntry;
+  setTimeout(()=>{
+    switch(lockSetupStep){
+      case 'create':
+        lockSetupPendingPin = entered;
+        beginLockSetupStep('confirm-create', 'Confirm your PIN');
+        break;
+      case 'confirm-create':
+        if(entered===lockSetupPendingPin){
+          settings.lockEnabled = true;
+          settings.lockPin = hashPin(entered);
+          saveSettings();
+          toast('App lock enabled');
+          closeLockSetupPad();
+          document.getElementById('lockToggle').classList.add('on');
+          document.getElementById('lockChangeRow').style.display = 'flex';
+          updateLockStatusLabel();
+        } else {
+          shakeDots('lockSetupDots');
+          renderLockDots('lockSetupDots', 4, true);
+          setTimeout(()=>{ toast("PINs didn't match — try again"); beginLockSetupStep('create', 'Choose a 4-digit PIN'); }, 380);
+        }
+        break;
+      case 'remove-verify':
+        if(hashPin(entered)===settings.lockPin){
+          settings.lockEnabled = false;
+          settings.lockPin = null;
+          saveSettings();
+          toast('App lock turned off');
+          closeLockSetupPad();
+          document.getElementById('lockToggle').classList.remove('on');
+          document.getElementById('lockChangeRow').style.display = 'none';
+          updateLockStatusLabel();
+        } else {
+          shakeDots('lockSetupDots');
+          renderLockDots('lockSetupDots', 4, true);
+          setTimeout(()=>{ lockSetupEntry=''; renderLockDots('lockSetupDots',0,false); }, 380);
+        }
+        break;
+      case 'change-verify':
+        if(hashPin(entered)===settings.lockPin){
+          beginLockSetupStep('change-create', 'Enter a new PIN');
+        } else {
+          shakeDots('lockSetupDots');
+          renderLockDots('lockSetupDots', 4, true);
+          setTimeout(()=>{ lockSetupEntry=''; renderLockDots('lockSetupDots',0,false); }, 380);
+        }
+        break;
+      case 'change-create':
+        lockSetupPendingPin = entered;
+        beginLockSetupStep('change-confirm', 'Confirm your new PIN');
+        break;
+      case 'change-confirm':
+        if(entered===lockSetupPendingPin){
+          settings.lockPin = hashPin(entered);
+          saveSettings();
+          toast('PIN updated');
+          closeLockSetupPad();
+        } else {
+          shakeDots('lockSetupDots');
+          renderLockDots('lockSetupDots', 4, true);
+          setTimeout(()=>{ toast("PINs didn't match — try again"); beginLockSetupStep('change-create', 'Enter a new PIN'); }, 380);
+        }
+        break;
+    }
+  }, 120);
+}
+document.getElementById('moreLockBtn').addEventListener('click', openLockSetup);
+document.getElementById('lockSetupClose').addEventListener('click', ()=> hideOverlay('lockSetupOverlay'));
+function updateLockStatusLabel(){
+  const el = document.getElementById('lockStatusLabel');
+  if(!el) return;
+  el.textContent = settings.lockEnabled ? 'On' : 'Off';
+  el.classList.toggle('on', !!settings.lockEnabled);
+}
+
 (async function init(){
   await loadAll();
   applySettings();
+  updateLockStatusLabel();
   syncSortRadios();
   document.querySelector('[data-sort-radio="streak-desc"]').checked = true;
   switchPage('today');
+  if(isAppLocked()) showLockScreen();
   if(goals.some(g=>g.reminderOn)) ensureNotificationPermission();
   setInterval(checkReminders, 20000);
 })();
