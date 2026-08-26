@@ -22,6 +22,8 @@ let currentSort = 'streak-desc';
 let editingGoalId = null;
 let actionTargetId = null;
 let currentPage = 'today';
+let backExitArmed = false;
+let backExitTimer = null;
 let detailGoalId = null;
 let goalDetailReturnPage = 'today';
 let measureTargetId = null;
@@ -291,6 +293,56 @@ function toast(msg){
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+/* ---------- mobile back-button handling ---------- */
+// Strategy: keep one "guard" entry on top of the browser history stack at all
+// times. Every real back-press pops that guard and fires popstate here. We
+// look at what's currently open/shown and decide what a back-press should do:
+//   1) an overlay/sheet is open        -> close it, re-arm the guard
+//   2) locked behind the PIN screen    -> do nothing, re-arm the guard
+//   3) on any page other than "today"  -> go to "today", re-arm the guard
+//   4) already on "today", nothing open, first press -> show a toast asking
+//      to press back again, re-arm the guard
+//   5) already on "today", nothing open, second press within 2s -> don't
+//      re-arm the guard, so the next real back-press actually leaves the app
+function pushBackGuard(){
+  history.pushState({ fndGuard:true }, '', location.href);
+}
+function initBackButtonHandling(){
+  pushBackGuard();
+  window.addEventListener('popstate', handleBackPress);
+}
+function handleBackPress(){
+  const openOverlay = document.querySelector('.overlay.show');
+  const lockScreen = document.getElementById('lockScreen');
+  const isLocked = lockScreen && lockScreen.style.display !== 'none';
+
+  if(openOverlay){
+    openOverlay.classList.remove('show');
+    pushBackGuard();
+    return;
+  }
+  if(isLocked){
+    pushBackGuard();
+    return;
+  }
+  if(currentPage !== 'today'){
+    switchPage('today');
+    pushBackGuard();
+    return;
+  }
+  if(!backExitArmed){
+    backExitArmed = true;
+    toast('Press back again to exit');
+    pushBackGuard();
+    clearTimeout(backExitTimer);
+    backExitTimer = setTimeout(()=>{ backExitArmed = false; }, 2000);
+    return;
+  }
+  // second press within the window: let this back-press through for real
+  clearTimeout(backExitTimer);
+  backExitArmed = false;
 }
 
 /* ---------- toggle today / any date ---------- */
@@ -1186,4 +1238,5 @@ function updateLockStatusLabel(){
   if(isAppLocked()) showLockScreen();
   if(goals.some(g=>g.reminderOn)) ensureNotificationPermission();
   setInterval(checkReminders, 20000);
+  initBackButtonHandling();
 })();
