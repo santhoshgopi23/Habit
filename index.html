@@ -265,6 +265,31 @@
   </div>
 </div>
 
+<!-- single-day edit sheet (tap a box in the tracking history heatmap) -->
+<div class="overlay" id="dayEditOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 id="dayEditTitle">Edit day</h2>
+    <p class="sheet-sub" id="dayEditSub"></p>
+
+    <div class="seg-control day-edit-yesno" id="dayEditYesNo" style="display:none;">
+      <button type="button" class="seg-btn" id="dayEditMarkDone">✓ Done</button>
+      <button type="button" class="seg-btn" id="dayEditMarkNotDone">— Not done</button>
+    </div>
+
+    <div class="field" id="dayEditMeasureField" style="display:none;">
+      <label id="dayEditUnitLabel">Value</label>
+      <input type="number" inputmode="decimal" id="dayEditValue" placeholder="0">
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="dayEditCancel">Cancel</button>
+      <button class="btn-save" id="dayEditSave">Save</button>
+    </div>
+    <button class="btn-delete" id="dayEditClear">Clear this day's entry</button>
+  </div>
+</div>
+
 <!-- sort sheet -->
 <div class="overlay" id="sortOverlay">
   <div class="sheet">

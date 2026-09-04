@@ -28,6 +28,9 @@ let detailGoalId = null;
 let goalDetailReturnPage = 'today';
 let measureTargetId = null;
 let measureTargetDate = null;
+let dayEditTargetId = null;
+let dayEditTargetDate = null;
+let dayEditPendingDone = null;
 let perfTab = 'daily';        // daily | weekly | monthly
 let historyRange = '12w';     // 1m | 12w | 3m | 1y
 let notifiedReminders = {};
@@ -837,7 +840,8 @@ function renderGoalCharts(g, c){
           else if(isMeasurable && cell.done) title = `${fmtDate(cell.date)}: ${cell.value}${g.unit?' '+g.unit:''}`;
           else title = `${fmtDate(cell.date)}: ${cell.done ? 'done' : 'not done'}`;
         }
-        return `<div class="heatmap-cell ${isFuture?'future':''}" style="${style}" title="${title}"></div>`;
+        const clickable = !isFuture && !noData;
+        return `<div class="heatmap-cell ${isFuture?'future':''}" style="${style}" title="${title}" ${clickable?`data-editday="${g.id}" data-date="${cell.date}"`:''}></div>`;
       }).join('')}</div>`).join('')}
     </div>
     <div class="heatmap-legend"><span>Less</span>
@@ -874,6 +878,61 @@ function wireGoalDetailEvents(g){
   });
   document.querySelectorAll('[data-perf]').forEach(b=> b.addEventListener('click', ()=>{ perfTab = b.dataset.perf; renderGoalDetail(); }));
   document.querySelectorAll('[data-range]').forEach(b=> b.addEventListener('click', ()=>{ historyRange = b.dataset.range; renderGoalDetail(); }));
+  document.querySelectorAll('#goalDetailContent .heatmap-cell[data-editday]').forEach(cell=>{
+    cell.addEventListener('click', ()=> openDayEdit(cell.dataset.editday, cell.dataset.date));
+  });
+}
+
+/* ---------- single-day edit sheet (heatmap cell tap) ---------- */
+function openDayEdit(id, dateStr){
+  const g = findGoal(id); if(!g) return;
+  if(dateStr > todayStr() || dateStr < g.createdAt) return;
+  dayEditTargetId = id;
+  dayEditTargetDate = dateStr;
+  document.getElementById('dayEditTitle').textContent = g.name;
+  document.getElementById('dayEditSub').textContent = fmtDate(dateStr);
+  const yesNoWrap = document.getElementById('dayEditYesNo');
+  const measureWrap = document.getElementById('dayEditMeasureField');
+  if(g.type==='measurable'){
+    yesNoWrap.style.display = 'none';
+    measureWrap.style.display = 'block';
+    document.getElementById('dayEditUnitLabel').textContent = g.unit ? `Value (${g.unit})` : 'Value';
+    const existing = g.log[dateStr];
+    document.getElementById('dayEditValue').value = (typeof existing==='number') ? existing : '';
+  } else {
+    measureWrap.style.display = 'none';
+    yesNoWrap.style.display = 'flex';
+    dayEditPendingDone = !!g.log[dateStr];
+    updateDayEditYesNoUI();
+  }
+  showOverlay('dayEditOverlay');
+}
+function updateDayEditYesNoUI(){
+  document.getElementById('dayEditMarkDone').classList.toggle('active', dayEditPendingDone===true);
+  document.getElementById('dayEditMarkNotDone').classList.toggle('active', dayEditPendingDone===false);
+}
+function saveDayEdit(){
+  const g = findGoal(dayEditTargetId); if(!g) return;
+  const d = dayEditTargetDate; if(!d) return;
+  if(g.type==='measurable'){
+    const raw = document.getElementById('dayEditValue').value;
+    const v = parseFloat(raw);
+    if(raw===''||isNaN(v)){ toast('Enter a number'); return; }
+    g.log[d] = v;
+  } else {
+    if(dayEditPendingDone) g.log[d] = true; else delete g.log[d];
+  }
+  saveGoals();
+  hideOverlay('dayEditOverlay');
+  renderCurrentPage();
+}
+function clearDayEdit(){
+  const g = findGoal(dayEditTargetId); if(!g) return;
+  const d = dayEditTargetDate; if(!d) return;
+  delete g.log[d];
+  saveGoals();
+  hideOverlay('dayEditOverlay');
+  renderCurrentPage();
 }
 
 /* ---------- action sheet ---------- */
@@ -976,6 +1035,13 @@ document.getElementById('gReminderToggle').addEventListener('click', ()=>{
 document.getElementById('measureCancel').addEventListener('click', ()=>hideOverlay('measureOverlay'));
 document.getElementById('measureSave').addEventListener('click', saveMeasureEntry);
 document.getElementById('measureClear').addEventListener('click', clearMeasureEntry);
+
+/* ---------- single-day edit sheet ---------- */
+document.getElementById('dayEditMarkDone').addEventListener('click', ()=>{ dayEditPendingDone = true; updateDayEditYesNoUI(); });
+document.getElementById('dayEditMarkNotDone').addEventListener('click', ()=>{ dayEditPendingDone = false; updateDayEditYesNoUI(); });
+document.getElementById('dayEditCancel').addEventListener('click', ()=> hideOverlay('dayEditOverlay'));
+document.getElementById('dayEditSave').addEventListener('click', saveDayEdit);
+document.getElementById('dayEditClear').addEventListener('click', clearDayEdit);
 
 document.querySelectorAll('.nav-item').forEach(n=> n.addEventListener('click', ()=> switchPage(n.dataset.page)));
 document.getElementById('goalDetailBackBtn').addEventListener('click', ()=> switchPage(goalDetailReturnPage || 'today'));

@@ -228,6 +228,10 @@ body.fs-large{zoom:1.12;}
 .heatmap-row{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
 .heatmap-cell{aspect-ratio:1;border-radius:4px;}
 .heatmap-cell.future{background:transparent !important;}
+.heatmap-cell[data-editday]{cursor:pointer;transition:transform .1s ease;}
+.heatmap-cell[data-editday]:active{transform:scale(0.82);}
+.day-edit-yesno .seg-btn{border:1.5px solid var(--border);border-radius:10px;padding:12px 0;}
+.day-edit-yesno .seg-btn.active{border-color:var(--green);}
 .heatmap-legend{display:flex;align-items:center;justify-content:center;gap:5px;margin-top:12px;}
 .heatmap-legend span:not(.heatmap-cell){font-size:10.5px;color:var(--gray-light);font-weight:600;}
 .heatmap-legend .heatmap-cell{width:11px;height:11px;flex-shrink:0;aspect-ratio:unset;}
