@@ -226,7 +226,7 @@ body.fs-large{zoom:1.12;}
 .heatmap-daylabels span{font-size:9.5px;color:var(--gray-light);text-align:center;font-weight:700;}
 .heatmap-grid{display:flex;flex-direction:column;gap:4px;}
 .heatmap-row{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
-.heatmap-cell{aspect-ratio:1;border-radius:4px;}
+.heatmap-cell{aspect-ratio:1;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:700;line-height:1;overflow:hidden;}
 .heatmap-cell.future{background:transparent !important;}
 .heatmap-cell[data-editday]{cursor:pointer;transition:transform .1s ease;}
 .heatmap-cell[data-editday]:active{transform:scale(0.82);}

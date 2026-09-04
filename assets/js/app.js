@@ -274,6 +274,7 @@ function goalPerfectDays(goal, days){
   return count;
 }
 const REDHEX = '#C0392B';
+const GREENHEX = '#2D6A4A';
 function goalMeasurableTotal(goal){
   if(goal.type!=='measurable') return 0;
   return Object.values(goal.log).reduce((s,v)=> s + (typeof v==='number' ? v : 0), 0);
@@ -814,6 +815,8 @@ function renderGoalCharts(g, c){
   </div>`;
 
   const dayLabels = ['S','M','T','W','T','F','S'];
+  const measurableVals = isMeasurable ? Object.values(g.log).filter(v=>typeof v==='number' && !isNaN(v)) : [];
+  const maxLoggedVal = measurableVals.length ? Math.max(...measurableVals) : 0;
   const heatHtml = `<div class="stat-card">
     <h3>Tracking history <span class="stat-card-sub">${rangeLabel(historyRange)}</span></h3>
     <div class="seg-control wrap4" id="historyTabs">
@@ -827,29 +830,44 @@ function renderGoalCharts(g, c){
       ${heatRows.map(row=>`<div class="heatmap-row">${row.map(cell=>{
         const isFuture = cell.date > todayStr();
         const noData = cell.eligible===0;
-        const hasValue = typeof cell.value==='number';
-        const missedLogged = isMeasurable && !noData && hasValue && !cell.done;
+        const hasValue = typeof cell.value==='number' && !isNaN(cell.value);
         let style = 'background:#EEEAE0;';
+        let numText = '';
+        let textStyle = '';
         if(!isFuture && !noData){
-          style = missedLogged ? `background:${hexToRgba(REDHEX, 0.8)};` : `background:${hexToRgba(c.hex, cell.done ? 0.9 : 0.12)};`;
+          if(isMeasurable){
+            if(hasValue){
+              // intensity scales with how close this entry is to the highest entry ever logged for this habit
+              const ratio = maxLoggedVal>0 ? (cell.value/maxLoggedVal) : 1;
+              const intensity = Math.min(1, Math.max(0.25, ratio));
+              const baseHex = cell.done ? GREENHEX : REDHEX;
+              style = `background:${hexToRgba(baseHex, intensity)};`;
+              numText = fmtNum(cell.value);
+              textStyle = `color:${intensity>0.55?'#fff':'var(--ink)'};`;
+            } else {
+              style = 'background:#EEEAE0;';
+            }
+          } else {
+            style = `background:${cell.done ? GREENHEX : REDHEX};`;
+          }
         }
         let title = '';
         if(!isFuture){
           if(noData) title = `${fmtDate(cell.date)}: not started yet`;
-          else if(missedLogged) title = `${fmtDate(cell.date)}: ${cell.value}${g.unit?' '+g.unit:''} — over target`;
-          else if(isMeasurable && cell.done) title = `${fmtDate(cell.date)}: ${cell.value}${g.unit?' '+g.unit:''}`;
+          else if(isMeasurable && hasValue) title = `${fmtDate(cell.date)}: ${cell.value}${g.unit?' '+g.unit:''}${cell.done?'':' — missed target'}`;
+          else if(isMeasurable) title = `${fmtDate(cell.date)}: no entry logged`;
           else title = `${fmtDate(cell.date)}: ${cell.done ? 'done' : 'not done'}`;
         }
         const clickable = !isFuture && !noData;
-        return `<div class="heatmap-cell ${isFuture?'future':''}" style="${style}" title="${title}" ${clickable?`data-editday="${g.id}" data-date="${cell.date}"`:''}></div>`;
+        return `<div class="heatmap-cell ${isFuture?'future':''}" style="${style}${textStyle}" title="${title}" ${clickable?`data-editday="${g.id}" data-date="${cell.date}"`:''}>${numText}</div>`;
       }).join('')}</div>`).join('')}
     </div>
-    <div class="heatmap-legend"><span>Less</span>
-      <span class="heatmap-cell" style="background:${hexToRgba(c.hex,0.12)}"></span>
-      <span class="heatmap-cell" style="background:${hexToRgba(c.hex,0.9)}"></span>
-      <span>More</span>
+    <div class="heatmap-legend"><span>Missed</span>
+      <span class="heatmap-cell" style="background:${hexToRgba(REDHEX,0.9)}"></span>
+      <span class="heatmap-cell" style="background:${hexToRgba(GREENHEX,0.9)}"></span>
+      <span>Completed</span>
     </div>
-    ${isMeasurable ? `<div class="heatmap-legend" style="margin-top:8px;"><span class="heatmap-cell" style="background:${hexToRgba(REDHEX,0.8)}"></span><span>Logged, over target</span></div>` : ''}
+    ${isMeasurable ? `<div class="heatmap-legend" style="margin-top:8px;"><span style="font-size:10.5px;color:var(--gray-light);font-weight:600;">Shade depth = amount logged, relative to your highest-ever entry (${fmtNum(maxLoggedVal)}${g.unit?' '+g.unit:''})</span></div>` : ''}
   </div>`;
 
   const insightCards = [];
