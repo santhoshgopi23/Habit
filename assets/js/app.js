@@ -31,6 +31,13 @@ let measureTargetDate = null;
 let dayEditTargetId = null;
 let dayEditTargetDate = null;
 let dayEditPendingDone = null;
+
+/* ---------- motion state (not persisted — just tracks what to animate on next render) ---------- */
+let celebrateGoalId = null;   // goal whose status-toggle should "pop" on next Today render
+let celebrateBoxKey = null;   // "goalId:date" of a week-box/heatmap-cell that should "pop" on next render
+let prevConsistency = null;   // last-seen consistency % (for pulse-on-change)
+let prevCurStreak = null;     // last-seen current streak (for pulse-on-change)
+let prevBestStreak = null;    // last-seen best streak (for pulse-on-change + confetti)
 let perfTab = 'daily';        // daily | weekly | monthly
 let historyRange = '12w';     // 1m | 12w | 3m | 1y
 let notifiedReminders = {};
@@ -299,6 +306,30 @@ function toast(msg){
   toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
 }
 
+/* ---------- small motion helpers ---------- */
+function pulseIfChanged(elId, prevVal, newVal){
+  if(prevVal===null || prevVal===newVal) return;
+  const el = document.getElementById(elId);
+  if(!el) return;
+  el.classList.remove('stat-pulse');
+  void el.offsetWidth; // restart the animation even if the class never left
+  el.classList.add('stat-pulse');
+}
+function burstConfetti(){
+  const colors = ['#2D6A4A','#3B6EA0','#B5722C','#C0392B','#E0A05C'];
+  const count = 20;
+  for(let i=0;i<count;i++){
+    const el = document.createElement('div');
+    el.className = 'confetti-piece';
+    el.style.left = Math.random()*100+'vw';
+    el.style.background = colors[i%colors.length];
+    el.style.animationDelay = (Math.random()*0.18)+'s';
+    el.style.animationDuration = (0.9+Math.random()*0.5)+'s';
+    document.body.appendChild(el);
+    setTimeout(()=>el.remove(), 1700);
+  }
+}
+
 /* ---------- mobile back-button handling ---------- */
 // Strategy: keep one "guard" entry on top of the browser history stack at all
 // times. Every real back-press pops that guard and fires popstate here. We
@@ -355,7 +386,12 @@ function toggleGoalDate(id, dateStr){
   const g = findGoal(id); if(!g) return;
   if(dateStr > todayStr() || dateStr < g.createdAt) return;
   if(g.type==='measurable'){ openMeasureEntry(id, dateStr); return; }
+  const nowDone = !g.log[dateStr];
   if(g.log[dateStr]) delete g.log[dateStr]; else g.log[dateStr]=true;
+  if(nowDone){
+    celebrateBoxKey = id+':'+dateStr;
+    if(dateStr===todayStr()) celebrateGoalId = id;
+  }
   saveGoals(); renderCurrentPage();
 }
 
@@ -381,6 +417,8 @@ function saveMeasureEntry(){
   const v = parseFloat(raw);
   if(raw===''||isNaN(v)){ toast('Enter a number'); return; }
   g.log[d] = v;
+  celebrateBoxKey = measureTargetId+':'+d;
+  if(d===todayStr()) celebrateGoalId = measureTargetId;
   saveGoals();
   hideOverlay('measureOverlay');
   renderCurrentPage();
@@ -520,6 +558,7 @@ function renderCurrentPage(){
   else if(currentPage==='progress') renderProgress();
   else if(currentPage==='pillars') renderGoalsOverview();
   else if(currentPage==='goal-detail') renderGoalDetail();
+  celebrateBoxKey = null; celebrateGoalId = null; // consumed for this render pass, wherever they landed
 }
 function openGoalDetail(id, returnPage){
   const g = findGoal(id); if(!g) return;
@@ -548,6 +587,17 @@ function renderToday(){
   document.getElementById('curStreak').textContent = cs+' day'+(cs===1?'':'s');
   document.getElementById('bestStreak').textContent = bs+' day'+(bs===1?'':'s');
 
+  // pulse any headline number that actually changed since the last render, and
+  // throw a little confetti the moment the user sets a brand-new best streak
+  pulseIfChanged('consistencyValue', prevConsistency, oc);
+  pulseIfChanged('curStreak', prevCurStreak, cs);
+  if(prevBestStreak!==null && bs>prevBestStreak){
+    pulseIfChanged('bestStreak', prevBestStreak, bs);
+    burstConfetti();
+    toast('🎉 New best streak — '+bs+' days!');
+  }
+  prevConsistency = oc; prevCurStreak = cs; prevBestStreak = bs;
+
   const listsEl = document.getElementById('lists');
   listsEl.innerHTML = '';
 
@@ -567,10 +617,11 @@ function renderToday(){
     const missedToday = g.type==='measurable' && typeof todayVal==='number' && !isDoneValue(g, todayVal);
     const valNote = (g.type==='measurable' && typeof todayVal==='number') ? ` · <span class="${missedToday?'val-miss':''}">Today: ${todayVal}${g.unit?' '+g.unit:''}</span>` : '';
     const totalNote = g.type==='measurable' ? `Total: ${fmtNum(totalMeasurableSum(g))}${g.unit?' '+g.unit:''}` : '';
+    const justCompleted = g.id===celebrateGoalId;
     const row = document.createElement('div');
     row.className = 'entry';
     row.innerHTML = `
-      <div class="status-toggle ${done?'done':'notdone'}" data-check="${g.id}">
+      <div class="status-toggle ${done?'done':'notdone'} ${justCompleted?'toggle-pop':''}" data-check="${g.id}">
         <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
         <svg class="x-icon" viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
       </div>
@@ -604,6 +655,7 @@ function last7Html(g){
     let cls = 'week-box';
     if(disabled) cls += ' week-box-empty';
     else cls += isDone(g, d) ? ' week-box-yes' : ' week-box-no';
+    if(celebrateBoxKey===(g.id+':'+d)) cls += ' box-pop';
     const label = new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'});
     html += `<span class="${cls}" ${disabled?'':`data-editday="${g.id}" data-date="${d}"`} title="${label}"></span>`;
   }
@@ -859,7 +911,8 @@ function renderGoalCharts(g, c){
           else title = `${fmtDate(cell.date)}: ${cell.done ? 'done' : 'not done'}`;
         }
         const clickable = !isFuture && !noData;
-        return `<div class="heatmap-cell ${isFuture?'future':''}" style="${style}${textStyle}" title="${title}" ${clickable?`data-editday="${g.id}" data-date="${cell.date}"`:''}>${numText}</div>`;
+        const justEdited = celebrateBoxKey===(g.id+':'+cell.date);
+        return `<div class="heatmap-cell ${isFuture?'future':''} ${justEdited?'box-pop':''}" style="${style}${textStyle}" title="${title}" ${clickable?`data-editday="${g.id}" data-date="${cell.date}"`:''}>${numText}</div>`;
       }).join('')}</div>`).join('')}
     </div>
     <div class="heatmap-legend"><span>Missed</span>
@@ -940,6 +993,8 @@ function saveDayEdit(){
   } else {
     if(dayEditPendingDone) g.log[d] = true; else delete g.log[d];
   }
+  celebrateBoxKey = dayEditTargetId+':'+d;
+  if(d===todayStr()) celebrateGoalId = dayEditTargetId;
   saveGoals();
   hideOverlay('dayEditOverlay');
   renderCurrentPage();
@@ -948,6 +1003,7 @@ function clearDayEdit(){
   const g = findGoal(dayEditTargetId); if(!g) return;
   const d = dayEditTargetDate; if(!d) return;
   delete g.log[d];
+  celebrateBoxKey = dayEditTargetId+':'+d;
   saveGoals();
   hideOverlay('dayEditOverlay');
   renderCurrentPage();

@@ -302,3 +302,68 @@ body.dark .lock-key-del{background:transparent;}
 .lock-setup-pad .lock-dots{margin-bottom:20px;}
 .lock-setup-pad .lock-keypad{grid-template-columns:repeat(3,56px);gap:12px;}
 .lock-setup-pad .lock-key{width:56px;height:56px;font-size:18px;}
+
+/* ==================================================================
+   MOTION & MICRO-INTERACTIONS
+   ================================================================== */
+
+/* respect users who've asked for reduced motion — kill everything below */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:0.001ms !important;animation-iteration-count:1 !important;transition-duration:0.001ms !important;}
+}
+
+/* ---- page switches: soft fade + rise ---- */
+.page.active{animation:pageIn .32s cubic-bezier(.22,.61,.36,1);}
+@keyframes pageIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+
+/* ---- universal tap feedback: every tappable control gets a satisfying press ---- */
+.status-toggle,.choice-btn,.icon-opt,.color-opt,.sq-btn,.sort-btn,.seg-btn,.settings-menu-btn,
+.nav-item,.back-btn,.sheet-x,.btn-save,.btn-cancel,.btn-delete,.group-iconbtn,.entry-menu,
+.week-toggle,.pillar-card,.toggle-switch,.clear-link,.settings-btn-plain,.icon-btn,.check-row{
+  transition:transform .12s cubic-bezier(.34,1.56,.64,1), background-color .12s ease, border-color .12s ease, opacity .12s ease;
+}
+.status-toggle:active,.choice-btn:active,.icon-opt:active,.color-opt:active,.sq-btn:active,
+.sort-btn:active,.seg-btn:active,.settings-menu-btn:active,.nav-item:active,.back-btn:active,
+.sheet-x:active,.btn-save:active,.btn-cancel:active,.btn-delete:active,.group-iconbtn:active,
+.entry-menu:active,.week-toggle:active,.pillar-card:active,.toggle-switch:active,.check-row:active,
+.clear-link:active,.settings-btn-plain:active,.icon-btn:active{
+  transform:scale(0.93);
+}
+.fab{transition:transform .12s cubic-bezier(.34,1.56,.64,1);}
+.fab:active{transform:scale(0.90) rotate(90deg);}
+.entry-icon{transition:transform .12s cubic-bezier(.34,1.56,.64,1);}
+.entry:active .entry-icon{transform:scale(0.90);}
+
+/* ---- nav item: little lift + icon bounce when selected ---- */
+.nav-item span{transition:transform .18s cubic-bezier(.34,1.56,.64,1);}
+.nav-item.active span{animation:navPop .32s cubic-bezier(.34,1.56,.64,1);}
+@keyframes navPop{0%{transform:scale(1);}45%{transform:scale(1.28) translateY(-2px);}100%{transform:scale(1);}}
+
+/* ---- status toggle: bouncy pop the moment a habit is marked done ---- */
+@keyframes togglePop{0%{transform:scale(0.55);}55%{transform:scale(1.22);}75%{transform:scale(0.94);}100%{transform:scale(1);}}
+.status-toggle.toggle-pop{animation:togglePop .42s cubic-bezier(.34,1.56,.64,1);}
+.status-toggle.toggle-pop.done svg{animation:checkDraw .28s ease-out;}
+@keyframes checkDraw{from{stroke-dasharray:40;stroke-dashoffset:40;}to{stroke-dasharray:40;stroke-dashoffset:0;}}
+
+/* ---- week-box / heatmap-cell: pop on edit ---- */
+.week-box.box-pop,.heatmap-cell.box-pop{animation:boxPop .3s cubic-bezier(.34,1.56,.64,1);}
+@keyframes boxPop{0%{transform:scale(0.6);}60%{transform:scale(1.18);}100%{transform:scale(1);}}
+
+/* ---- overlay: fade the backdrop in as a keyframe so display:none→flex still animates ---- */
+.overlay.show{animation:overlayFade .18s ease;}
+@keyframes overlayFade{from{background:rgba(0,0,0,0);}to{background:rgba(0,0,0,0.45);}}
+.sheet{animation:up .26s cubic-bezier(.22,.61,.36,1);}
+
+/* ---- stat value pulse: consistency %, streak counters, any number that just changed ---- */
+@keyframes statPulse{0%{transform:scale(1);}40%{transform:scale(1.22);color:var(--green);}100%{transform:scale(1);}}
+.stat-pulse{display:inline-block;animation:statPulse .5s cubic-bezier(.34,1.56,.64,1);}
+
+/* ---- confetti burst for a new best streak ---- */
+.confetti-piece{position:fixed;top:-12px;width:8px;height:8px;border-radius:2px;z-index:500;pointer-events:none;animation:confettiFall 1.2s ease-in forwards;}
+@keyframes confettiFall{
+  0%{transform:translateY(0) rotate(0deg);opacity:1;}
+  100%{transform:translateY(105vh) rotate(600deg);opacity:0;}
+}
+
+/* ---- consistency ring: smoother sweep ---- */
+.consistency-ring{transition:background 0.5s cubic-bezier(.22,.61,.36,1);}
