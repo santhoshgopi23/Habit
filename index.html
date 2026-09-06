@@ -52,6 +52,31 @@
 </div>
 
 <div class="wrap">
+
+  <!-- BOOT SKELETON — shown instantly while the app reads localStorage & renders,
+       then fades out once real content is ready (see revealApp() in app.js) -->
+  <div class="boot-skeleton" id="bootSkeleton" aria-hidden="true">
+    <div class="skel-headrow">
+      <div class="skel skel-title"></div>
+      <div class="skel skel-sub"></div>
+    </div>
+    <div class="skel-summary">
+      <div class="skel skel-ring"></div>
+      <div class="skel-stats">
+        <div class="skel skel-line w60"></div>
+        <div class="skel skel-line w40"></div>
+        <div class="skel skel-line w40"></div>
+      </div>
+    </div>
+    <div class="skel-list">
+      <div class="skel-row"><div class="skel skel-toggle"></div><div class="skel skel-icon"></div><div class="skel-row-main"><div class="skel skel-line w70"></div><div class="skel skel-line w50"></div></div></div>
+      <div class="skel-row"><div class="skel skel-toggle"></div><div class="skel skel-icon"></div><div class="skel-row-main"><div class="skel skel-line w60"></div><div class="skel skel-line w40"></div></div></div>
+      <div class="skel-row"><div class="skel skel-toggle"></div><div class="skel skel-icon"></div><div class="skel-row-main"><div class="skel skel-line w80"></div><div class="skel skel-line w45"></div></div></div>
+      <div class="skel-row"><div class="skel skel-toggle"></div><div class="skel skel-icon"></div><div class="skel-row-main"><div class="skel skel-line w55"></div><div class="skel skel-line w35"></div></div></div>
+    </div>
+  </div>
+
+  <div id="appContent" class="app-content-hidden">
   <div class="head-row">
     <div class="head-title">
       <h1>Today</h1>
@@ -129,6 +154,8 @@
       Everything here lives only on this device.<br>Missing a day doesn't erase the ones before it.
     </p>
   </div>
+  </div><!-- /#appContent -->
+
 </div>
 
 <button class="fab" id="fabBtn">+</button>
@@ -140,7 +167,23 @@
   <div class="nav-item" data-page="more"><span>⋯</span>More</div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast">
+  <span class="toast-msg" id="toastMsg"></span>
+  <button class="toast-undo" id="toastUndoBtn" style="display:none;">Undo</button>
+</div>
+
+<!-- generic confirm sheet (replaces browser confirm() so destructive actions match the app's look) -->
+<div class="overlay" id="confirmOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 id="confirmTitle">Are you sure?</h2>
+    <p class="sheet-sub" id="confirmMessage"></p>
+    <div class="sheet-actions">
+      <button class="btn-cancel" id="confirmCancelBtn">Cancel</button>
+      <button class="btn-save danger" id="confirmActionBtn">Confirm</button>
+    </div>
+  </div>
+</div>
 
 <!-- settings sheet -->
 <div class="overlay" id="settingsOverlay">

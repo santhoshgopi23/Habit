@@ -38,6 +38,7 @@ let celebrateBoxKey = null;   // "goalId:date" of a week-box/heatmap-cell that s
 let prevConsistency = null;   // last-seen consistency % (for pulse-on-change)
 let prevCurStreak = null;     // last-seen current streak (for pulse-on-change)
 let prevBestStreak = null;    // last-seen best streak (for pulse-on-change + confetti)
+let prevSumToday = null;      // last-seen "today" completed count (for count-up)
 let perfTab = 'daily';        // daily | weekly | monthly
 let historyRange = '12w';     // 1m | 12w | 3m | 1y
 let notifiedReminders = {};
@@ -184,6 +185,19 @@ function overallBestStreak(){
   }
   return Math.max(longest, overallStreak());
 }
+/* streak flame — purely a rendering tier computed from the streak number that's already
+   on hand, no new state to track. Glow/animation intensity escalates at 7/14/30/100 days. */
+function streakFlameClass(days){
+  if(days>=100) return 'flame-t4';
+  if(days>=30) return 'flame-t3';
+  if(days>=14) return 'flame-t2';
+  if(days>=7) return 'flame-t1';
+  return '';
+}
+function flameSpan(days){
+  if(days<=0) return '';
+  return `<span class="flame ${streakFlameClass(days)}">🔥</span>`;
+}
 function consistencyColor(pct){
   if(pct>=70) return getCss('--green');
   if(pct>=40) return getCss('--amber');
@@ -300,13 +314,85 @@ function hexToRgba(hex, alpha){
 let toastTimer;
 function toast(msg){
   const t = document.getElementById('toast');
-  t.textContent = msg;
+  const undoBtn = document.getElementById('toastUndoBtn');
+  document.getElementById('toastMsg').textContent = msg;
+  undoBtn.style.display = 'none';
+  undoBtn.onclick = null;
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
 }
+/* same as toast(), but shows an inline Undo button for a few seconds — used for
+   reversible destructive actions (e.g. deleting a goal) so there's a safety net
+   right after the action instead of only a confirm dialog beforehand. */
+function toastWithUndo(msg, onUndo){
+  const t = document.getElementById('toast');
+  const undoBtn = document.getElementById('toastUndoBtn');
+  document.getElementById('toastMsg').textContent = msg;
+  undoBtn.style.display = 'inline-block';
+  undoBtn.onclick = ()=>{
+    clearTimeout(toastTimer);
+    t.classList.remove('show');
+    undoBtn.style.display = 'none';
+    onUndo();
+  };
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ t.classList.remove('show'); undoBtn.style.display='none'; undoBtn.onclick=null; }, 4200);
+}
+
+/* ---------- confirm sheet (replaces window.confirm() so destructive actions
+   match the rest of the app's UI instead of popping the browser's own dialog) ---------- */
+let pendingConfirmAction = null;
+function openConfirmSheet(title, message, confirmLabel, onConfirm){
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmMessage').textContent = message;
+  document.getElementById('confirmActionBtn').textContent = confirmLabel;
+  pendingConfirmAction = onConfirm;
+  showOverlay('confirmOverlay');
+}
+document.getElementById('confirmCancelBtn').addEventListener('click', ()=>{
+  pendingConfirmAction = null;
+  hideOverlay('confirmOverlay');
+});
+document.getElementById('confirmActionBtn').addEventListener('click', ()=>{
+  const action = pendingConfirmAction;
+  pendingConfirmAction = null;
+  hideOverlay('confirmOverlay');
+  if(action) action();
+});
 
 /* ---------- small motion helpers ---------- */
+function prefersReducedMotion(){
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+function hapticTap(pattern){
+  // treat haptics as "motion" too — skip them for anyone who's asked the OS/browser to reduce it
+  if(prefersReducedMotion()) return;
+  if(navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){ /* unsupported, ignore */ } }
+}
+
+/* count a headline number up/down from its old value instead of snapping straight to the new one.
+   elId: element whose textContent gets updated every frame.
+   formatter(n): turns the in-progress integer into the display string (adds "%", " days", etc). */
+const countUpFrames = {};
+function animateValue(elId, from, to, formatter){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  formatter = formatter || (n=>String(n));
+  if(countUpFrames[elId]){ cancelAnimationFrame(countUpFrames[elId]); delete countUpFrames[elId]; }
+  from = Number(from); to = Number(to);
+  if(isNaN(from) || from===to || prefersReducedMotion()){ el.textContent = formatter(to); return; }
+  const duration = 550, start = performance.now();
+  function tick(now){
+    const t = Math.min(1, (now-start)/duration);
+    const eased = 1 - Math.pow(1-t, 3); // easeOutCubic — quick start, soft landing
+    el.textContent = formatter(Math.round(from + (to-from)*eased));
+    if(t<1) countUpFrames[elId] = requestAnimationFrame(tick);
+    else { el.textContent = formatter(to); delete countUpFrames[elId]; }
+  }
+  countUpFrames[elId] = requestAnimationFrame(tick);
+}
 function pulseIfChanged(elId, prevVal, newVal){
   if(prevVal===null || prevVal===newVal) return;
   const el = document.getElementById(elId);
@@ -314,6 +400,20 @@ function pulseIfChanged(elId, prevVal, newVal){
   el.classList.remove('stat-pulse');
   void el.offsetWidth; // restart the animation even if the class never left
   el.classList.add('stat-pulse');
+}
+/* a small on-brand "seedling in a jar" illustration for empty states — uses currentColor
+   via CSS vars so it adapts to dark mode automatically, no image assets needed */
+function emptyIllustrationSVG(){
+  return `<svg class="empty-illustration" width="112" height="100" viewBox="0 0 112 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <ellipse cx="56" cy="92" rx="34" ry="6" fill="var(--border)" opacity="0.45"/>
+    <path d="M30 46 L34 88 Q34.5 92 39 92 L73 92 Q77.5 92 78 88 L82 46 Z" fill="var(--white)" stroke="var(--border)" stroke-width="3"/>
+    <path d="M27 46 H85" stroke="var(--border)" stroke-width="3" stroke-linecap="round"/>
+    <rect x="38" y="30" width="36" height="16" rx="6" fill="var(--white)" stroke="var(--border)" stroke-width="3"/>
+    <path d="M56 84 V52" stroke="var(--green)" stroke-width="4" stroke-linecap="round"/>
+    <ellipse cx="44" cy="58" rx="11" ry="7" transform="rotate(-28 44 58)" fill="var(--green)"/>
+    <ellipse cx="68" cy="52" rx="11" ry="7" transform="rotate(28 68 52)" fill="var(--green)"/>
+    <circle cx="56" cy="84" r="4" fill="var(--amber)"/>
+  </svg>`;
 }
 function burstConfetti(){
   const colors = ['#2D6A4A','#3B6EA0','#B5722C','#C0392B','#E0A05C'];
@@ -388,6 +488,7 @@ function toggleGoalDate(id, dateStr){
   if(g.type==='measurable'){ openMeasureEntry(id, dateStr); return; }
   const nowDone = !g.log[dateStr];
   if(g.log[dateStr]) delete g.log[dateStr]; else g.log[dateStr]=true;
+  hapticTap(nowDone ? 10 : 6); // a touch stronger for marking done than for undoing
   if(nowDone){
     celebrateBoxKey = id+':'+dateStr;
     if(dateStr===todayStr()) celebrateGoalId = id;
@@ -417,6 +518,7 @@ function saveMeasureEntry(){
   const v = parseFloat(raw);
   if(raw===''||isNaN(v)){ toast('Enter a number'); return; }
   g.log[d] = v;
+  hapticTap(isDoneValue(g, v) ? 10 : 6);
   celebrateBoxKey = measureTargetId+':'+d;
   if(d===todayStr()) celebrateGoalId = measureTargetId;
   saveGoals();
@@ -530,13 +632,29 @@ function saveGoalForm(){
   hideOverlay('goalFormOverlay');
   renderCurrentPage();
 }
+let lastDeletedGoal = null;
+let lastDeletedIndex = null;
 function deleteGoal(id){
+  const idx = goals.findIndex(g=>g.id===id);
+  if(idx===-1) return;
+  lastDeletedGoal = goals[idx];
+  lastDeletedIndex = idx;
   goals = goals.filter(g=>g.id!==id);
   saveGoals();
   hideOverlay('actionOverlay');
-  toast('Goal deleted');
+  toastWithUndo('Goal deleted', undoDeleteGoal);
   if(currentPage==='goal-detail' && detailGoalId===id) switchPage(goalDetailReturnPage || 'today');
   else renderCurrentPage();
+}
+function undoDeleteGoal(){
+  if(!lastDeletedGoal) return;
+  const idx = Math.min(lastDeletedIndex, goals.length);
+  goals.splice(idx, 0, lastDeletedGoal);
+  lastDeletedGoal = null;
+  lastDeletedIndex = null;
+  saveGoals();
+  toast('Goal restored');
+  renderCurrentPage();
 }
 
 /* ---------- overlays ---------- */
@@ -580,29 +698,34 @@ function renderToday(){
   document.getElementById('habitCount').textContent = goals.length + ' goal' + (goals.length===1?'':'s');
 
   const oc = overallConsistency(), cs = overallStreak(), bs = overallBestStreak();
-  document.getElementById('consistencyValue').textContent = oc+'%';
-  document.getElementById('consistencyRing').style.background = `conic-gradient(${consistencyColor(oc)} 0% ${oc}%, #EEEAE0 ${oc}% 100%)`;
   const todayDone = goals.filter(g=>isDone(g, todayStr())).length;
-  document.getElementById('sumToday').textContent = todayDone+'/'+goals.length;
-  document.getElementById('curStreak').textContent = cs+' day'+(cs===1?'':'s');
-  document.getElementById('bestStreak').textContent = bs+' day'+(bs===1?'':'s');
 
-  // pulse any headline number that actually changed since the last render, and
-  // throw a little confetti the moment the user sets a brand-new best streak
+  // count each headline number up/down from its previous value instead of snapping —
+  // on the very first render (prev===null) it counts up from 0, which doubles as a nice
+  // little "welcome" animation right after the boot skeleton fades out
+  animateValue('consistencyValue', prevConsistency!==null ? prevConsistency : 0, oc, n=>n+'%');
+  animateValue('sumToday', prevSumToday!==null ? prevSumToday : 0, todayDone, n=>n+'/'+goals.length);
+  animateValue('curStreak', prevCurStreak!==null ? prevCurStreak : 0, cs, n=>n+' day'+(n===1?'':'s'));
+  animateValue('bestStreak', prevBestStreak!==null ? prevBestStreak : 0, bs, n=>n+' day'+(n===1?'':'s'));
+  document.getElementById('consistencyRing').style.background = `conic-gradient(${consistencyColor(oc)} 0% ${oc}%, #EEEAE0 ${oc}% 100%)`;
+
+  // on top of the count-up, give any number that actually changed a little bounce+color
+  // flash, and throw confetti + a haptic buzz the moment the user sets a brand-new best streak
   pulseIfChanged('consistencyValue', prevConsistency, oc);
   pulseIfChanged('curStreak', prevCurStreak, cs);
   if(prevBestStreak!==null && bs>prevBestStreak){
     pulseIfChanged('bestStreak', prevBestStreak, bs);
     burstConfetti();
+    hapticTap([10,40,10,40,20]);
     toast('🎉 New best streak — '+bs+' days!');
   }
-  prevConsistency = oc; prevCurStreak = cs; prevBestStreak = bs;
+  prevConsistency = oc; prevCurStreak = cs; prevBestStreak = bs; prevSumToday = todayDone;
 
   const listsEl = document.getElementById('lists');
   listsEl.innerHTML = '';
 
   if(goals.length===0){
-    listsEl.innerHTML = `<div class="empty-state"><div class="glyph">🎯</div><p>No goals yet.<br>Tap + to create your first goal.</p></div>`;
+    listsEl.innerHTML = `<div class="empty-state">${emptyIllustrationSVG()}<p>No goals yet.<br>Tap + to create your first goal.</p></div>`;
     return;
   }
 
@@ -628,12 +751,28 @@ function renderToday(){
       <div class="entry-icon" style="background:${c.hex}">${g.icon}</div>
       <div class="entry-main" data-open="${g.id}">
         <div class="entry-name">${escapeHtml(g.name)}</div>
-        <div class="entry-sub">${streak>0 ? '🔥 '+streak+'-day streak' : 'Start today'} · ${consistency(g)}% consistency${valNote}</div>
+        <div class="entry-sub">${streak>0 ? flameSpan(streak)+' '+streak+'-day streak' : 'Start today'} · ${consistency(g)}% consistency${valNote}</div>
         ${totalNote ? `<div class="entry-sub2">${totalNote}</div>` : ''}
       </div>
       <button class="week-toggle" data-week="${g.id}" aria-label="Toggle 7-day view">▾</button>
     `;
-    wrap.appendChild(row);
+
+    // swipe shell: the two action panels sit behind .entry; wireSwipeRow() slides
+    // .entry over them with an inline transform as the user drags
+    const swipeRow = document.createElement('div');
+    swipeRow.className = 'swipe-row';
+    const rightAction = document.createElement('div');
+    rightAction.className = 'swipe-action swipe-action-right';
+    rightAction.innerHTML = `<span class="swipe-action-icon">✓</span><span class="swipe-label">${done?'Undo':'Complete'}</span>`;
+    const leftAction = document.createElement('div');
+    leftAction.className = 'swipe-action swipe-action-left';
+    leftAction.dataset.swipeDelete = g.id;
+    leftAction.innerHTML = `<span class="swipe-action-icon">🗑</span><span class="swipe-label">Delete</span>`;
+    swipeRow.appendChild(rightAction);
+    swipeRow.appendChild(leftAction);
+    swipeRow.appendChild(row);
+    wrap.appendChild(swipeRow);
+    wireSwipeRow(row, g.id);
 
     const strip = document.createElement('div');
     strip.className = 'week-strip';
@@ -645,6 +784,81 @@ function renderToday(){
 
   wireTodayEvents();
 }
+
+/* ---------- swipe-to-act on Today's goal rows ----------
+   swipe left  -> reveals a Delete panel (stays open until tapped or dismissed)
+   swipe right -> triggers quick-complete immediately and springs back
+   Only one row can be open at a time; tapping outside or opening another row closes it. */
+let openSwipeRowEl = null;
+function setSwipeX(el, x, animate){
+  el.style.transition = animate ? 'transform .22s cubic-bezier(.22,.61,.36,1)' : 'none';
+  el.style.transform = x ? `translateX(${x}px)` : '';
+}
+function closeSwipeRow(animate){
+  if(!openSwipeRowEl) return;
+  setSwipeX(openSwipeRowEl, 0, animate!==false);
+  openSwipeRowEl = null;
+}
+function wireSwipeRow(entryEl, goalId){
+  const ACTION_W = 84, OPEN_THRESHOLD = 40, COMPLETE_THRESHOLD = 56, RUBBER = ACTION_W+24;
+  let startX=0, startY=0, dx=0, dragging=false, axis=null, pointerId=null;
+
+  entryEl.addEventListener('pointerdown', e=>{
+    if(e.pointerType==='mouse' && e.button!==0) return;
+    startX=e.clientX; startY=e.clientY; dx=0; dragging=false; axis=null; pointerId=e.pointerId;
+    entryEl.classList.add('pressing');
+  });
+  entryEl.addEventListener('pointermove', e=>{
+    if(pointerId===null || e.pointerId!==pointerId) return;
+    const ddx = e.clientX-startX, ddy = e.clientY-startY;
+    if(axis===null){
+      if(Math.abs(ddx)<8 && Math.abs(ddy)<8) return;
+      axis = Math.abs(ddx)>Math.abs(ddy) ? 'x' : 'y';
+      entryEl.classList.remove('pressing');
+      if(axis==='x'){ try{ entryEl.setPointerCapture(pointerId); }catch(err){} }
+    }
+    if(axis!=='x') return; // vertical drag — leave it to normal page scrolling
+    e.preventDefault();
+    dragging = true;
+    const base = openSwipeRowEl===entryEl ? -ACTION_W : 0;
+    dx = base + ddx;
+    if(dx>RUBBER) dx = RUBBER + (dx-RUBBER)*0.25;
+    if(dx<-RUBBER) dx = -RUBBER + (dx+RUBBER)*0.25;
+    setSwipeX(entryEl, dx, false);
+  });
+  function finish(){
+    entryEl.classList.remove('pressing');
+    if(pointerId===null) return;
+    try{ entryEl.releasePointerCapture(pointerId); }catch(err){}
+    pointerId=null;
+    if(!dragging){ axis=null; return; } // was just a tap — normal click handlers take it from here
+    axis=null; dragging=false;
+    if(dx <= -OPEN_THRESHOLD){
+      closeSwipeRow(true);
+      setSwipeX(entryEl, -ACTION_W, true);
+      openSwipeRowEl = entryEl;
+      hapticTap(8);
+    } else if(dx >= COMPLETE_THRESHOLD){
+      setSwipeX(entryEl, 0, true);
+      if(openSwipeRowEl===entryEl) openSwipeRowEl=null;
+      hapticTap(10);
+      toggleGoalToday(goalId);
+    } else {
+      setSwipeX(entryEl, 0, true);
+      if(openSwipeRowEl===entryEl) openSwipeRowEl=null;
+    }
+  }
+  entryEl.addEventListener('pointerup', finish);
+  entryEl.addEventListener('pointercancel', finish);
+  // while this row is open, a tap on its content just closes it instead of firing its normal action
+  entryEl.addEventListener('click', e=>{
+    if(openSwipeRowEl===entryEl){ e.stopPropagation(); e.preventDefault(); closeSwipeRow(true); }
+  }, true);
+}
+// tapping anywhere outside the open row closes it
+document.addEventListener('pointerdown', e=>{
+  if(openSwipeRowEl && !openSwipeRowEl.contains(e.target)) closeSwipeRow(true);
+});
 function last7Html(g){
   let html = '<div class="week-boxes">';
   for(let i=6;i>=0;i--){
@@ -662,9 +876,27 @@ function last7Html(g){
   html += '</div>';
   return html;
 }
+/* lightweight "this is physically pressable" feedback: a slight lift the instant a
+   finger/cursor touches down, released on lift-off/cancel — pairs with the existing
+   :active CSS but fires reliably on touch, where :active can be flaky on some browsers */
+function wirePressFeedback(selector){
+  document.querySelectorAll(selector).forEach(el=>{
+    const press = ()=> el.classList.add('pressing');
+    const release = ()=> el.classList.remove('pressing');
+    el.addEventListener('pointerdown', press);
+    el.addEventListener('pointerup', release);
+    el.addEventListener('pointercancel', release);
+    el.addEventListener('pointerleave', release);
+  });
+}
 function wireTodayEvents(){
+  // .entry's own press/drag feedback is now handled inside wireSwipeRow() (called per-row
+  // at creation time), so the generic wirePressFeedback() isn't applied here anymore.
   document.querySelectorAll('[data-check]').forEach(el=>{
     el.addEventListener('click', e=>{ e.stopPropagation(); toggleGoalToday(el.dataset.check); });
+  });
+  document.querySelectorAll('[data-swipe-delete]').forEach(el=>{
+    el.addEventListener('click', ()=>{ closeSwipeRow(true); openActionSheet(el.dataset.swipeDelete); });
   });
   document.querySelectorAll('[data-open]').forEach(el=>{
     el.addEventListener('click', ()=>{ openGoalDetail(el.dataset.open, 'today'); });
@@ -689,7 +921,7 @@ function wireTodayEvents(){
 function renderProgress(){
   const el = document.getElementById('progressContent');
   if(goals.length===0){
-    el.innerHTML = `<div class="empty-state"><div class="glyph">📈</div><p>Add a few goals to see your progress here.</p></div>`;
+    el.innerHTML = `<div class="empty-state">${emptyIllustrationSVG()}<p>Add a few goals to see your progress here.</p></div>`;
     return;
   }
   const days = [];
@@ -723,7 +955,7 @@ function renderProgress(){
 function renderGoalsOverview(){
   const el = document.getElementById('pillarsContent');
   if(goals.length===0){
-    el.innerHTML = `<div class="empty-state"><div class="glyph">🧭</div><p>No goals yet.<br>Tap + on Today to create your first one.</p></div>`;
+    el.innerHTML = `<div class="empty-state">${emptyIllustrationSVG()}<p>No goals yet.<br>Tap + on Today to create your first one.</p></div>`;
     return;
   }
   const totals = goals.map(g=>({g, count: totalCompletions(g)}));
@@ -758,7 +990,7 @@ function renderGoalsOverview(){
     const streak = computeStreak(g);
     return `<div class="pillar-card" data-goaldetail="${g.id}">
       <div class="pillar-avatar" style="background:${c.hex}">${g.icon}</div>
-      <div class="pillar-main"><div class="pillar-cname">${escapeHtml(g.name)}</div><div class="pillar-csub">${streak>0 ? '🔥 '+streak+'-day streak':'Start today'} · ${pct}% consistency</div></div>
+      <div class="pillar-main"><div class="pillar-cname">${escapeHtml(g.name)}</div><div class="pillar-csub">${streak>0 ? flameSpan(streak)+' '+streak+'-day streak':'Start today'} · ${pct}% consistency</div></div>
       <div class="pillar-cnet" style="color:${c.hex}">${done?'✓':'—'}</div>
       <div class="pillar-chevron">›</div>
     </div>`;
@@ -945,7 +1177,7 @@ function wireGoalDetailEvents(g){
   document.getElementById('gdMenuBtn').addEventListener('click', ()=> openActionSheet(g.id));
   document.getElementById('gdEditBtn').addEventListener('click', ()=> openEditGoalForm(g.id));
   document.getElementById('gdDeleteBtn').addEventListener('click', ()=>{
-    if(confirm('Delete "'+g.name+'" and all its history?')) deleteGoal(g.id);
+    openConfirmSheet('Delete goal?', 'Delete "'+g.name+'" and all its history? You can undo right after.', 'Delete', ()=> deleteGoal(g.id));
   });
   document.querySelectorAll('[data-perf]').forEach(b=> b.addEventListener('click', ()=>{ perfTab = b.dataset.perf; renderGoalDetail(); }));
   document.querySelectorAll('[data-range]').forEach(b=> b.addEventListener('click', ()=>{ historyRange = b.dataset.range; renderGoalDetail(); }));
@@ -1078,7 +1310,10 @@ document.getElementById('actionEdit').addEventListener('click', ()=>{
 });
 document.getElementById('actionDelete').addEventListener('click', ()=>{
   const g = findGoal(actionTargetId);
-  if(g && confirm('Delete "'+g.name+'" and all its history?')) deleteGoal(actionTargetId);
+  if(!g) return;
+  const targetId = actionTargetId;
+  hideOverlay('actionOverlay');
+  openConfirmSheet('Delete goal?', 'Delete "'+g.name+'" and all its history? You can undo right after.', 'Delete', ()=> deleteGoal(targetId));
 });
 document.getElementById('actionCancel').addEventListener('click', ()=>hideOverlay('actionOverlay'));
 
@@ -1124,9 +1359,9 @@ document.getElementById('moreExportBtn').addEventListener('click', exportBackup)
 document.getElementById('moreImportBtn').addEventListener('click', ()=> document.getElementById('importFile').click());
 document.getElementById('importFile').addEventListener('change', e=>{ if(e.target.files[0]) importBackup(e.target.files[0]); e.target.value=''; });
 document.getElementById('moreResetBtn').addEventListener('click', ()=>{
-  if(confirm('Clear every goal and all history? This cannot be undone.')){
+  openConfirmSheet('Reset all data?', 'Clear every goal and all history? This cannot be undone.', 'Reset', ()=>{
     goals = []; saveGoals(); toast('All data cleared'); renderCurrentPage();
-  }
+  });
 });
 
 // close overlays on backdrop click
@@ -1368,7 +1603,22 @@ function updateLockStatusLabel(){
   el.classList.toggle('on', !!settings.lockEnabled);
 }
 
+/* fade the boot skeleton out and the real app in — held to a minimum display time so
+   the shimmer registers as "loading" instead of flashing by unnoticed, since reading
+   localStorage is normally instant */
+function revealApp(bootStart){
+  const minDisplayMs = 450;
+  const wait = Math.max(0, minDisplayMs - (performance.now()-bootStart));
+  setTimeout(()=>{
+    const skel = document.getElementById('bootSkeleton');
+    const content = document.getElementById('appContent');
+    if(content){ content.classList.remove('app-content-hidden'); content.classList.add('app-content-in'); }
+    if(skel){ skel.classList.add('boot-skeleton-out'); setTimeout(()=> skel.remove(), 280); }
+  }, wait);
+}
+
 (async function init(){
+  const bootStart = performance.now();
   await loadAll();
   applySettings();
   updateLockStatusLabel();
@@ -1379,4 +1629,5 @@ function updateLockStatusLabel(){
   if(goals.some(g=>g.reminderOn)) ensureNotificationPermission();
   setInterval(checkReminders, 20000);
   initBackButtonHandling();
+  revealApp(bootStart);
 })();
