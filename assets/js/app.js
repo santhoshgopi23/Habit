@@ -110,7 +110,17 @@ function saveSettings(){
 }
 
 /* ---------- date helpers ---------- */
-function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
+// IMPORTANT: use LOCAL date parts here, not toISOString() (which is UTC-based).
+// For anyone east of UTC (e.g. Singapore, UTC+8), toISOString() still reports
+// "yesterday" for several hours after local midnight, which made today's box
+// missing from the tracking history and today's entry look like it belonged
+// to yesterday until ~8am local time.
+function todayStr(d=new Date()){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 function dateNDaysAgo(n){ const d=new Date(); d.setDate(d.getDate()-n); return todayStr(d); }
 function fmtDate(str){ return new Date(str+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); }
 function daysElapsedInclusive(dateStr){
@@ -738,8 +748,11 @@ function renderToday(){
     const c = colorFor(g);
     const todayVal = g.log[todayStr()];
     const missedToday = g.type==='measurable' && typeof todayVal==='number' && !isDoneValue(g, todayVal);
-    const valNote = (g.type==='measurable' && typeof todayVal==='number') ? ` · <span class="${missedToday?'val-miss':''}">Today: ${todayVal}${g.unit?' '+g.unit:''}</span>` : '';
+    const hasTodayVal = g.type==='measurable' && typeof todayVal==='number';
     const totalNote = g.type==='measurable' ? `Total: ${fmtNum(totalMeasurableSum(g))}${g.unit?' '+g.unit:''}` : '';
+    const valueBadge = hasTodayVal
+      ? `<div class="entry-value-badge" style="background:${hexToRgba(missedToday?REDHEX:c.hex,0.16)};color:${missedToday?'var(--red)':c.hex}">${fmtNum(todayVal)}${g.unit?' '+g.unit:''}</div>`
+      : '';
     const justCompleted = g.id===celebrateGoalId;
     const row = document.createElement('div');
     row.className = 'entry';
@@ -751,9 +764,10 @@ function renderToday(){
       <div class="entry-icon" style="background:${c.hex}">${g.icon}</div>
       <div class="entry-main" data-open="${g.id}">
         <div class="entry-name">${escapeHtml(g.name)}</div>
-        <div class="entry-sub">${streak>0 ? flameSpan(streak)+' '+streak+'-day streak' : 'Start today'} · ${consistency(g)}% consistency${valNote}</div>
+        <div class="entry-sub">${streak>0 ? flameSpan(streak)+' '+streak+'-day streak' : 'Start today'} · ${consistency(g)}% consistency</div>
         ${totalNote ? `<div class="entry-sub2">${totalNote}</div>` : ''}
       </div>
+      ${valueBadge}
       <button class="week-toggle" data-week="${g.id}" aria-label="Toggle 7-day view">▾</button>
     `;
 

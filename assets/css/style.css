@@ -56,6 +56,7 @@ button,input,textarea,select{font-family:'Inter',sans-serif;}
 .entry-sub{font-size:12.5px;color:var(--gray);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .entry-sub2{font-size:11px;color:var(--gray-light);margin-top:1px;font-weight:700;}
 .entry-sub .val-miss{color:var(--red);font-weight:700;}
+.entry-value-badge{font-size:12.5px;font-weight:800;padding:5px 10px;border-radius:999px;flex-shrink:0;white-space:nowrap;}
 .entry-menu{background:none;border:none;color:var(--gray-light);font-size:18px;cursor:pointer;padding:4px 2px;flex-shrink:0;}
 .week-toggle{background:none;border:none;color:var(--gray-light);font-size:13px;cursor:pointer;padding:4px 6px;flex-shrink:0;transition:transform .15s ease;line-height:1;position:relative;}
 .week-toggle::after{content:'';position:absolute;inset:-8px;}
